@@ -60,4 +60,15 @@ async function excluir(req, res) {
   }
 }
 
-module.exports = { listar, criar, editar, excluir };
+// Limpar todos os lançamentos de um cliente
+async function limpar(req, res) {
+  try {
+    const { clienteId } = req.params;
+    await pool.query('DELETE FROM lancamentos WHERE cliente_id = $1', [clienteId]);
+    res.json({ mensagem: 'Lançamentos apagados com sucesso' });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+module.exports = { listar, criar, editar, excluir, limpar };
