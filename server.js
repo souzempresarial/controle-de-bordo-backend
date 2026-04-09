@@ -15,6 +15,7 @@ app.get('/', (req, res) => {
 
 // Rotas
 app.use('/clientes', require('./src/routes/clientes'));
+app.use('/clientes/:clienteId/lancamentos', require('./src/routes/lancamentos'));
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
