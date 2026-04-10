@@ -1,9 +1,14 @@
 const pool = require('../models/db');
 
-// Listar todos os clientes
+// Listar todos os clientes (admin) ou apenas o próprio (cliente)
 async function listar(req, res) {
   try {
-    const result = await pool.query('SELECT * FROM clientes ORDER BY nome');
+    if (req.usuario.papel === 'admin') {
+      const result = await pool.query('SELECT * FROM clientes ORDER BY nome');
+      return res.json(result.rows);
+    }
+    // Cliente só vê a si mesmo
+    const result = await pool.query('SELECT * FROM clientes WHERE id = $1', [req.usuario.clienteId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ erro: err.message });
