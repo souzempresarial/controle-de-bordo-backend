@@ -7,8 +7,15 @@ const autorizar  = require('./src/middleware/autorizar');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(o => o.trim());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS bloqueado'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
