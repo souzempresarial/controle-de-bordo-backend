@@ -109,4 +109,17 @@ async function alterarSenha(req, res) {
   }
 }
 
-module.exports = { login, registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, alterarSenha };
+// Redefinir senha de qualquer usuário (admin only)
+async function redefinirSenha(req, res) {
+  try {
+    const { novaSenha } = req.body;
+    if (!novaSenha || novaSenha.length < 6) return res.status(400).json({ erro: 'Senha deve ter no mínimo 6 caracteres' });
+    const hash = await bcrypt.hash(novaSenha, 10);
+    await pool.query('UPDATE usuarios SET senha_hash = $1 WHERE id = $2', [hash, req.params.id]);
+    res.json({ mensagem: 'Senha redefinida com sucesso' });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+module.exports = { login, registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, alterarSenha, redefinirSenha };

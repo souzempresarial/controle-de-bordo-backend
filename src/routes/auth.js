@@ -11,6 +11,7 @@ router.post('/registrar-admin', controller.registrarAdmin); // só funciona se n
 router.post('/usuarios',        autenticar, controller.criarUsuario);
 router.get('/usuarios',         autenticar, controller.listarUsuarios);
 router.delete('/usuarios/:id',  autenticar, controller.excluirUsuario);
-router.put('/senha',            autenticar, controller.alterarSenha);
+router.put('/senha',                autenticar, controller.alterarSenha);
+router.put('/usuarios/:id/senha',   autenticar, controller.redefinirSenha);
 
 module.exports = router;
