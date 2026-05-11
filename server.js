@@ -1,11 +1,18 @@
 require('dotenv').config();
 const express    = require('express');
 const cors       = require('cors');
+const fs         = require('fs');
+const path       = require('path');
+const pool       = require('./src/models/db');
 const autenticar = require('./src/middleware/autenticar');
 const autorizar  = require('./src/middleware/autorizar');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// Criar tabelas automaticamente na inicialização
+const sql = fs.readFileSync(path.join(__dirname, 'src/models/schema.sql'), 'utf8');
+pool.query(sql).then(() => console.log('Tabelas verificadas')).catch(err => console.error('Erro na migration:', err.message));
 
 const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(o => o.trim());
 app.use(cors({
