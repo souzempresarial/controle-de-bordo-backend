@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS lancamentos (
   criado_em      TIMESTAMP DEFAULT NOW()
 );
 
+-- Coluna adicionada para suporte a brindes vinculados a vendas
+ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS is_brinde BOOLEAN DEFAULT FALSE;
+
 -- CONTAS A PAGAR / RECEBER
 CREATE TABLE IF NOT EXISTS contas (
   id            SERIAL PRIMARY KEY,
