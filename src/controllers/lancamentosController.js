@@ -18,13 +18,13 @@ async function listar(req, res) {
 async function criar(req, res) {
   try {
     const { clienteId } = req.params;
-    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, is_brinde, grupo_id, valor_recebido, origem, obs } = req.body;
+    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs } = req.body;
     if (!tipo || !valor || !data) return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
     const result = await pool.query(
       `INSERT INTO lancamentos
-        (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, is_brinde, grupo_id, valor_recebido, origem, obs)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
-      [clienteId, tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, is_brinde||false, grupo_id||null, valor_recebido||null, origem||null, obs||null]
+        (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [clienteId, tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
