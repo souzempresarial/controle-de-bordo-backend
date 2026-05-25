@@ -36,11 +36,12 @@ async function criar(req, res) {
 async function editar(req, res) {
   try {
     const { id } = req.params;
-    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs } = req.body;
+    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, valor_recebido, grupo_id } = req.body;
     const result = await pool.query(
       `UPDATE lancamentos SET tipo=$1, valor=$2, data=$3, categoria=$4, subcategoria=$5,
-       descricao=$6, pagamento=$7, status=$8, quantidade=$9, obs=$10 WHERE id=$11 RETURNING *`,
-      [tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status, quantidade||null, obs||null, id]
+       descricao=$6, pagamento=$7, status=$8, quantidade=$9, obs=$10,
+       valor_recebido=$11, grupo_id=$12 WHERE id=$13 RETURNING *`,
+      [tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status, quantidade||null, obs||null, valor_recebido||null, grupo_id||null, id]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Lançamento não encontrado' });
     res.json(result.rows[0]);
