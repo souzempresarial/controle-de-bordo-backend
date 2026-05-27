@@ -1,0 +1,26 @@
+org: souzfinance
+app: souz-finance-api
+service: souz-finance-api
+
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: sa-east-1
+  environment:
+    DATABASE_URL: ${env:DATABASE_URL}
+    JWT_SECRET: ${env:JWT_SECRET}
+    CORS_ORIGIN: ${env:CORS_ORIGIN, '*'}
+
+functions:
+  api:
+    handler: handler.handler
+    timeout: 29
+    events:
+      - httpApi:
+          path: /
+          method: any
+      - httpApi:
+          path: /{proxy+}
+          method: any
