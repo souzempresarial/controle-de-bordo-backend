@@ -12,6 +12,13 @@ provider:
     DATABASE_URL: ${env:DATABASE_URL}
     JWT_SECRET: ${env:JWT_SECRET}
     CORS_ORIGIN: ${env:CORS_ORIGIN, '*'}
+  vpc:
+    securityGroupIds:
+      - sg-04442ff3260b8dfd9
+    subnetIds:
+      - subnet-0670082f68982a670
+      - subnet-09f1439d921500b5f
+      - subnet-05ea235eca12005a4
 
 functions:
   api:
