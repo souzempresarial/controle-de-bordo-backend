@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
   criado_em   TIMESTAMP DEFAULT NOW()
 );
 
+-- Migração: adicionar coluna valor_upgrade se não existir
+ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS valor_upgrade DECIMAL(12,2);
+
 -- SALDO INICIAL DFC
 CREATE TABLE IF NOT EXISTS saldo_inicial (
   id         SERIAL PRIMARY KEY,

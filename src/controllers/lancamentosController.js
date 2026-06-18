@@ -18,13 +18,13 @@ async function listar(req, res) {
 async function criar(req, res) {
   try {
     const { clienteId } = req.params;
-    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs } = req.body;
+    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade } = req.body;
     if (!tipo || !valor || !data) return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
     const result = await pool.query(
       `INSERT INTO lancamentos
-        (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [clienteId, tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null]
+        (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [clienteId, tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null, valor_upgrade||null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -36,12 +36,12 @@ async function criar(req, res) {
 async function editar(req, res) {
   try {
     const { id } = req.params;
-    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, valor_recebido, grupo_id } = req.body;
+    const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, valor_recebido, grupo_id, valor_upgrade } = req.body;
     const result = await pool.query(
       `UPDATE lancamentos SET tipo=$1, valor=$2, data=$3, categoria=$4, subcategoria=$5,
        descricao=$6, pagamento=$7, status=$8, quantidade=$9, obs=$10,
-       valor_recebido=$11, grupo_id=$12 WHERE id=$13 RETURNING *`,
-      [tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status, quantidade||null, obs||null, valor_recebido||null, grupo_id||null, id]
+       valor_recebido=$11, grupo_id=$12, valor_upgrade=$13 WHERE id=$14 RETURNING *`,
+      [tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status, quantidade||null, obs||null, valor_recebido||null, grupo_id||null, valor_upgrade||null, id]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Lançamento não encontrado' });
     res.json(result.rows[0]);
