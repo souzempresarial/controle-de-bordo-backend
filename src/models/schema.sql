@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 
 -- Migração: adicionar coluna valor_upgrade se não existir
 ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS valor_upgrade DECIMAL(12,2);
+ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS qtd_upgrade INTEGER;
 
 -- SALDO INICIAL DFC
 CREATE TABLE IF NOT EXISTS saldo_inicial (
