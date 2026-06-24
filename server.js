@@ -39,6 +39,7 @@ app.use('/clientes/:clienteId/lancamentos',       autenticar, autorizar, require
 app.use('/clientes/:clienteId/contas',            autenticar, autorizar, require('./src/routes/contas'));
 app.use('/clientes/:clienteId/metas',             autenticar, autorizar, require('./src/routes/metas'));
 app.use('/clientes/:clienteId/saldo/:ano',        autenticar, autorizar, require('./src/routes/saldo'));
+app.use('/clientes/:clienteId/capital/:mesChave', autenticar, autorizar, require('./src/routes/capital'));
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));

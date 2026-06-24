@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS usuarios (
 ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS valor_upgrade DECIMAL(12,2);
 ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS qtd_upgrade INTEGER;
 
+-- Migração: valor_juros por parcela de empréstimo
+ALTER TABLE contas ADD COLUMN IF NOT EXISTS valor_juros DECIMAL(12,2);
+
+-- RECURSOS EM CAPITAL
+CREATE TABLE IF NOT EXISTS capital (
+  id         SERIAL PRIMARY KEY,
+  cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+  mes_chave  VARCHAR(7) NOT NULL,
+  campo      VARCHAR(50) NOT NULL,
+  valor      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  UNIQUE(cliente_id, mes_chave, campo)
+);
+
 -- SALDO INICIAL DFC
 CREATE TABLE IF NOT EXISTS saldo_inicial (
   id         SERIAL PRIMARY KEY,
