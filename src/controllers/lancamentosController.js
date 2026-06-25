@@ -1,4 +1,4 @@
-const pool = require('../models/db');
+﻿const pool = require('../models/db');
 
 // Listar lançamentos de um cliente
 async function listar(req, res) {
@@ -19,7 +19,7 @@ async function criar(req, res) {
   try {
     const { clienteId } = req.params;
     const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade } = req.body;
-    if (!tipo || !valor || !data) return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
+    if (!tipo || valor === undefined || valor === null || valor === '' || !data) return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
     const result = await pool.query(
       `INSERT INTO lancamentos
         (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade)
