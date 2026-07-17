@@ -1,4 +1,6 @@
 const PDFParser = require('pdf2json');
+const pool = require('../models/db');
+const { extrairPalavraChave } = require('../controllers/extratoController');
 
 const GEMINI_MODEL = 'gemini-flash-latest';
 
@@ -38,16 +40,10 @@ Regras: valores positivos, datas YYYY-MM-DD, ignore entradas e saldos, use EXATA
 function extrairTextoPDF(buffer) {
   return new Promise((resolve, reject) => {
     const parser = new PDFParser(null, true);
-    parser.on('pdfParser_dataReady', () => {
-      resolve(parser.getRawTextContent());
-    });
+    parser.on('pdfParser_dataReady', () => resolve(parser.getRawTextContent()));
     parser.on('pdfParser_dataError', (err) => reject(err));
     parser.parseBuffer(buffer);
   });
-}
-
-function geminiUrl() {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GOOGLE_API_KEY}`;
 }
 
 function parseResposta(texto) {
@@ -56,7 +52,38 @@ function parseResposta(texto) {
   return json.transacoes || [];
 }
 
-async function processarExtrato(file) {
+function geminiUrl() {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GOOGLE_API_KEY}`;
+}
+
+async function buscarRegras(clienteId) {
+  if (!clienteId) return [];
+  try {
+    const { rows } = await pool.query(
+      'SELECT palavra_chave, categoria, subcategoria FROM regras_extrato WHERE cliente_id = $1',
+      [clienteId]
+    );
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+function aplicarRegras(transacoes, regras) {
+  if (!regras.length) return transacoes;
+  return transacoes.map(t => {
+    const descNorm = extrairPalavraChave(t.descricao || '');
+    const regra = regras.find(r =>
+      descNorm.includes(r.palavra_chave) || r.palavra_chave.includes(descNorm)
+    );
+    if (regra) {
+      return { ...t, categoria_sugerida: regra.categoria, subcategoria_sugerida: regra.subcategoria || null };
+    }
+    return t;
+  });
+}
+
+async function processarExtrato(file, clienteId) {
   const mime = file.mimetype;
 
   if (mime === 'application/pdf' || mime.startsWith('image/')) {
@@ -91,7 +118,10 @@ async function processarExtrato(file) {
     console.log('[Extrato] resposta recebida do Gemini');
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('Resposta vazia do Gemini');
-    return parseResposta(text);
+
+    const transacoes = parseResposta(text);
+    const regras = await buscarRegras(clienteId);
+    return aplicarRegras(transacoes, regras);
   }
 
   throw new Error('Formato não suportado. Envie PDF ou imagem (JPG, PNG).');

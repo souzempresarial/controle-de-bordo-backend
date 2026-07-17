@@ -91,3 +91,13 @@ CREATE TABLE IF NOT EXISTS saldo_inicial (
   mes        INTEGER NOT NULL,
   UNIQUE(cliente_id, ano)
 );
+
+-- REGRAS DE CATEGORIZAÇÃO DE EXTRATO (aprendizado por cliente)
+CREATE TABLE IF NOT EXISTS regras_extrato (
+  id           SERIAL PRIMARY KEY,
+  cliente_id   INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+  palavra_chave TEXT NOT NULL,
+  categoria    TEXT NOT NULL,
+  subcategoria TEXT,
+  UNIQUE(cliente_id, palavra_chave)
+);
