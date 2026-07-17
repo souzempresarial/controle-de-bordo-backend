@@ -92,10 +92,8 @@ async function processarExtrato(file, clienteId) {
     let body;
     if (mime === 'application/pdf') {
       const textoRaw = await extrairTextoPDF(file.buffer);
-      const linhas = textoRaw.split('\n').map(l => l.trim()).filter(Boolean);
-      const temData  = l => /\d{2}\/\d{2}/.test(l);
-      const temValor = l => /\d[\d.]*,\d{2}/.test(l);
-      const texto = linhas.filter(l => temData(l) || temValor(l)).join('\n');
+      const linhas = textoRaw.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+      const texto = linhas.join('\n').slice(0, 12000);
       console.log(`[Extrato] texto: ${textoRaw.length} → ${texto.length} chars`);
       body = { contents: [{ parts: [{ text: `${PROMPT_SISTEMA}\n\nExtrato bancário:\n${texto}` }] }] };
     } else {
