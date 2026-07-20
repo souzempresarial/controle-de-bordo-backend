@@ -1,5 +1,5 @@
 const pool = require('../models/db');
-const { processarExtrato } = require('../services/extratoService');
+const { processarExtrato, extrairPalavraChave } = require('../services/extratoService');
 
 async function processar(req, res) {
   try {
@@ -37,27 +37,6 @@ async function salvarRegras(req, res) {
     console.error('[Regras]', err.message);
     res.status(500).json({ erro: err.message });
   }
-}
-
-const PREFIXOS = [
-  'transferência enviada pelo pix ',
-  'transf enviada pelo pix ',
-  'pix enviado para ',
-  'pix enviado ',
-  'compra no débito ',
-  'compra no crédito ',
-  'pagamento efetuado ',
-  'débito automático ',
-  'ted enviada ',
-  'doc enviado ',
-];
-
-function extrairPalavraChave(descricao) {
-  let d = descricao.trim().toLowerCase();
-  for (const p of PREFIXOS) {
-    if (d.startsWith(p)) return d.slice(p.length).trim();
-  }
-  return d;
 }
 
 module.exports = { processar, salvarRegras, extrairPalavraChave };

@@ -1,6 +1,26 @@
 const PDFParser = require('pdf2json');
 const pool = require('../models/db');
-const { extrairPalavraChave } = require('../controllers/extratoController');
+
+const PREFIXOS = [
+  'transferência enviada pelo pix ',
+  'transf enviada pelo pix ',
+  'pix enviado para ',
+  'pix enviado ',
+  'compra no débito ',
+  'compra no crédito ',
+  'pagamento efetuado ',
+  'débito automático ',
+  'ted enviada ',
+  'doc enviado ',
+];
+
+function extrairPalavraChave(descricao) {
+  let d = descricao.trim().toLowerCase();
+  for (const p of PREFIXOS) {
+    if (d.startsWith(p)) return d.slice(p.length).trim();
+  }
+  return d;
+}
 
 const GEMINI_MODEL = 'gemini-flash-latest';
 
@@ -90,8 +110,12 @@ function filtrarPorPeriodo(linhas, dataInicio, dataFim) {
 
   if (!datasF.some(d => d) && !datasB.some(d => d)) return linhas;
 
-  return linhas.filter((_, i) => {
-    const d = rodapeEstilo ? (datasB[i] || datasF[i]) : (datasF[i] || datasB[i]);
+  return linhas.filter((linha, i) => {
+    // Linha com data própria (ex: PagBank inline) — usa diretamente, ignora propagação
+    const propria = parseDateFromLine(linha);
+    const d = propria
+      ? propria
+      : (rodapeEstilo ? (datasB[i] || datasF[i]) : (datasF[i] || datasB[i]));
     if (!d) return true;
     return (!inicio || d >= inicio) && (!fim || d <= fim);
   });
@@ -158,9 +182,12 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
         /^[*•.\-–—]+$/.test(l);
       const linhasFiltradas = todasLinhas.filter(l => !isLixo(l));
       const linhasPeriodo   = filtrarPorPeriodo(linhasFiltradas, dataInicio, dataFim);
+      // Normaliza espaços internos: pdf2json posiciona texto com centenas de espaços entre colunas
+      const linhasNorm = linhasPeriodo.map(l => l.replace(/\s+/g, ' ').trim()).filter(l => l.length > 1);
       const CAP = (dataInicio || dataFim) ? 15000 : 22000;
-      const texto = linhasPeriodo.join('\n').slice(0, CAP);
-      console.log(`[Extrato] ${textoRaw.length} raw → ${linhasFiltradas.length} linhas filtradas → ${linhasPeriodo.length} no período → ${texto.length} chars (cap ${CAP}, período: ${dataInicio||'*'} a ${dataFim||'*'})`);
+      const texto = linhasNorm.join('\n').slice(0, CAP);
+      console.log(`[Extrato] ${textoRaw.length} raw → ${linhasFiltradas.length} filtradas → ${linhasPeriodo.length} no período → ${linhasNorm.length} norm → ${texto.length} chars (cap ${CAP}, período: ${dataInicio||'*'} a ${dataFim||'*'})`);
+      console.log('[Extrato] primeiras 50 linhas norm:', linhasNorm.slice(0, 50).join(' | '));
       body = { contents: [{ parts: [{ text: `${PROMPT_SISTEMA}\n\nExtrato bancário:\n${texto}` }] }] };
     } else {
       const base64 = file.buffer.toString('base64');
@@ -191,4 +218,4 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
   throw new Error('Formato não suportado. Envie PDF ou imagem (JPG, PNG).');
 }
 
-module.exports = { processarExtrato };
+module.exports = { processarExtrato, extrairPalavraChave };
