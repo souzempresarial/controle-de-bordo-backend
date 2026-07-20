@@ -4,7 +4,9 @@ const { processarExtrato } = require('../services/extratoService');
 async function processar(req, res) {
   try {
     if (!req.file) return res.status(400).json({ erro: 'Nenhum arquivo enviado.' });
-    const transacoes = await processarExtrato(req.file, req.params.clienteId);
+    const dataInicio = req.body?.dataInicio || null;
+    const dataFim    = req.body?.dataFim    || null;
+    const transacoes = await processarExtrato(req.file, req.params.clienteId, dataInicio, dataFim);
     res.json({ transacoes });
   } catch (err) {
     console.error('[Extrato]', err.message);
