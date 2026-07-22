@@ -4,14 +4,21 @@ const controller = require('../controllers/authController');
 const autenticar = require('../middleware/autenticar');
 
 // Públicas
-router.post('/login',           controller.login);
-router.post('/registrar-admin', controller.registrarAdmin); // só funciona se não houver admin
+router.post('/login',              controller.login);
+router.post('/registro',           controller.registrarPublico);
+router.get('/verificar/:token',    controller.verificarEmail);
+router.post('/reenviar-verificacao', controller.reenviarVerificacao);
+router.post('/registrar-admin',    controller.registrarAdmin);
 
-// Protegidas (admin only)
-router.post('/usuarios',        autenticar, controller.criarUsuario);
-router.get('/usuarios',         autenticar, controller.listarUsuarios);
-router.delete('/usuarios/:id',  autenticar, controller.excluirUsuario);
-router.put('/senha',                autenticar, controller.alterarSenha);
-router.put('/usuarios/:id/senha',   autenticar, controller.redefinirSenha);
+// Perfil do próprio usuário
+router.get('/me',       autenticar, controller.minhaInfo);
+router.put('/perfil',   autenticar, controller.editarPerfil);
+router.put('/senha',    autenticar, controller.alterarSenha);
+
+// Admin
+router.post('/usuarios',              autenticar, controller.criarUsuario);
+router.get('/usuarios',               autenticar, controller.listarUsuarios);
+router.delete('/usuarios/:id',        autenticar, controller.excluirUsuario);
+router.put('/usuarios/:id/senha',     autenticar, controller.redefinirSenha);
 
 module.exports = router;

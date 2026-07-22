@@ -31,7 +31,8 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/', (req, res) => res.json({ status: 'ok', message: 'Controle de Bordo API' }));
 
 // Rotas públicas
-app.use('/auth', require('./src/routes/auth'));
+app.use('/auth',  require('./src/routes/auth'));
+app.use('/admin', require('./src/routes/admin'));
 
 // Rotas protegidas
 app.use('/clientes',                              autenticar, require('./src/routes/clientes'));

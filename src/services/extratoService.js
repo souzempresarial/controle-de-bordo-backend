@@ -66,13 +66,27 @@ const MESES = {
   FEB:1, APR:3, MAY:4, AUG:7, SEP:8, OCT:9, DEC:11,
 };
 
-function parseDateFromLine(linha) {
+function parseDateFromLine(linha, anoCtx) {
   // DD/MM/YYYY
   let m = linha.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (m) return new Date(parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1]));
   // DD-MM-YYYY
   m = linha.match(/(\d{2})-(\d{2})-(\d{4})/);
   if (m) return new Date(parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1]));
+  // DD/MM/YY (2 dígitos de ano — Stone usa esse formato)
+  m = linha.match(/\b(\d{2})\/(\d{2})\/(\d{2})\b/);
+  if (m) {
+    const d = parseInt(m[1]), mes = parseInt(m[2]), ano = 2000 + parseInt(m[3]);
+    if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12) return new Date(ano, mes-1, d);
+  }
+  // DD/MM sem ano — usa anoCtx do período (evita capturar valores como 12/50)
+  if (anoCtx) {
+    m = linha.match(/\b(\d{2})\/(\d{2})\b(?!\/)/);
+    if (m) {
+      const d = parseInt(m[1]), mes = parseInt(m[2]);
+      if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12) return new Date(anoCtx, mes-1, d);
+    }
+  }
   // DD MMM, YYYY ou DD MMM YYYY ou DD MMMM, YYYY (ex: 01 Jul, 2026 / 01 JULHO 2026)
   m = linha.match(/(\d{1,2})\s+([A-ZÇÃÕÁÉÍÓÚa-záéíóúâêôàü]+),?\s+(\d{4})/i);
   if (m) {
@@ -87,6 +101,8 @@ function filtrarPorPeriodo(linhas, dataInicio, dataFim) {
   if (!dataInicio && !dataFim) return linhas;
   const inicio = dataInicio ? new Date(dataInicio + 'T00:00:00') : null;
   const fim    = dataFim    ? new Date(dataFim    + 'T23:59:59') : null;
+  // Ano de referência para datas sem ano (ex: Stone usa "09/07" sem ano)
+  const anoCtx = parseInt((dataFim || dataInicio).slice(0, 4));
 
   // Infinity coloca a data no RODAPÉ do dia → backward tem prioridade
   // Stone/outros colocam no CABEÇALHO → forward tem prioridade
@@ -95,7 +111,7 @@ function filtrarPorPeriodo(linhas, dataInicio, dataFim) {
   const datasF = new Array(linhas.length).fill(null);
   let cur = null;
   for (let i = 0; i < linhas.length; i++) {
-    const d = parseDateFromLine(linhas[i]);
+    const d = parseDateFromLine(linhas[i], anoCtx);
     if (d) cur = d;
     datasF[i] = cur;
   }
@@ -103,7 +119,7 @@ function filtrarPorPeriodo(linhas, dataInicio, dataFim) {
   const datasB = new Array(linhas.length).fill(null);
   cur = null;
   for (let i = linhas.length - 1; i >= 0; i--) {
-    const d = parseDateFromLine(linhas[i]);
+    const d = parseDateFromLine(linhas[i], anoCtx);
     if (d) cur = d;
     datasB[i] = cur;
   }
@@ -111,8 +127,8 @@ function filtrarPorPeriodo(linhas, dataInicio, dataFim) {
   if (!datasF.some(d => d) && !datasB.some(d => d)) return linhas;
 
   return linhas.filter((linha, i) => {
-    // Linha com data própria (ex: PagBank inline) — usa diretamente, ignora propagação
-    const propria = parseDateFromLine(linha);
+    // Linha com data própria — usa diretamente, ignora propagação
+    const propria = parseDateFromLine(linha, anoCtx);
     const d = propria
       ? propria
       : (rodapeEstilo ? (datasB[i] || datasF[i]) : (datasF[i] || datasB[i]));
@@ -188,7 +204,10 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
       const texto = linhasNorm.join('\n').slice(0, CAP);
       console.log(`[Extrato] ${textoRaw.length} raw → ${linhasFiltradas.length} filtradas → ${linhasPeriodo.length} no período → ${linhasNorm.length} norm → ${texto.length} chars (cap ${CAP}, período: ${dataInicio||'*'} a ${dataFim||'*'})`);
       console.log('[Extrato] primeiras 50 linhas norm:', linhasNorm.slice(0, 50).join(' | '));
-      body = { contents: [{ parts: [{ text: `${PROMPT_SISTEMA}\n\nExtrato bancário:\n${texto}` }] }] };
+      const contextoData = (dataInicio || dataFim)
+        ? `\n\nPeríodo do extrato: ${dataInicio || '?'} a ${dataFim || '?'}. Use esse intervalo para inferir o ano quando as datas no texto estiverem no formato DD/MM sem ano.`
+        : '';
+      body = { contents: [{ parts: [{ text: `${PROMPT_SISTEMA}${contextoData}\n\nExtrato bancário:\n${texto}` }] }] };
     } else {
       const base64 = file.buffer.toString('base64');
       body = {
