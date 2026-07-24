@@ -106,3 +106,20 @@ CREATE TABLE IF NOT EXISTS regras_extrato (
   subcategoria TEXT,
   UNIQUE(cliente_id, palavra_chave)
 );
+
+-- CONTROLE DE UPGRADE
+CREATE TABLE IF NOT EXISTS aparelhos_upgrade (
+  id               SERIAL PRIMARY KEY,
+  cliente_id       INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+  modelo           VARCHAR(100) NOT NULL,
+  cor              VARCHAR(50),
+  armazenamento    VARCHAR(20),
+  bateria          INTEGER,
+  email_aparelho   VARCHAR(255),
+  observacoes      TEXT,
+  valor_avaliado   DECIMAL(12,2),
+  valor_pretendido DECIMAL(12,2),
+  status           VARCHAR(20) DEFAULT 'estoque',
+  criado_em        TIMESTAMP DEFAULT NOW(),
+  vendido_em       TIMESTAMP
+);
