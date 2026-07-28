@@ -1,4 +1,4 @@
-org: souzfinance
+﻿org: souzfinance
 app: souz-finance-api
 service: souz-finance-api
 
@@ -11,7 +11,7 @@ provider:
   environment:
     DATABASE_URL: ${env:DATABASE_URL}
     JWT_SECRET: ${env:JWT_SECRET}
-    CORS_ORIGIN: ${env:CORS_ORIGIN, '*'}
+    CORS_ORIGIN: ${env:CORS_ORIGIN, 'https://controle-de-bordo-react.vercel.app'}
     BREVO_API_KEY: ${env:BREVO_API_KEY}
     ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
     GOOGLE_API_KEY: ${env:GOOGLE_API_KEY}
