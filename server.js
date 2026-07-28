@@ -1,11 +1,12 @@
 require('dotenv').config();
-const express    = require('express');
-const cors       = require('cors');
-const fs         = require('fs');
-const path       = require('path');
-const pool       = require('./src/models/db');
-const autenticar = require('./src/middleware/autenticar');
-const autorizar  = require('./src/middleware/autorizar');
+const express      = require('express');
+const cors         = require('cors');
+const cookieParser = require('cookie-parser');
+const fs           = require('fs');
+const path         = require('path');
+const pool         = require('./src/models/db');
+const autenticar   = require('./src/middleware/autenticar');
+const autorizar    = require('./src/middleware/autorizar');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -14,18 +15,21 @@ const PORT = process.env.PORT || 3000;
 const sql = fs.readFileSync(path.join(__dirname, 'src/models/schema.sql'), 'utf8');
 pool.query(sql).then(() => console.log('Tabelas verificadas')).catch(err => console.error('Erro na migration:', err.message));
 
-const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(o => o.trim());
+const defaultOrigins = 'http://localhost:5173,http://localhost:5174';
+const allowedOrigins = (process.env.CORS_ORIGIN || defaultOrigins).split(',').map(o => o.trim());
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('CORS bloqueado'));
     }
   },
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => res.json({ status: 'ok', message: 'Controle de Bordo API' }));

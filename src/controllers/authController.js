@@ -83,7 +83,15 @@ async function login(req, res) {
       { expiresIn: '8h' }
     );
 
-    res.json({ token, papel: usuario.papel, clienteId: usuario.cliente_id, nome: usuario.nome });
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('cb_token', token, {
+      httpOnly: true,
+      secure:   isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge:   8 * 60 * 60 * 1000,
+    });
+
+    res.json({ papel: usuario.papel, clienteId: usuario.cliente_id, nome: usuario.nome });
   } catch (err) {
     res.status(500).json({ erro: err.message });
   }
@@ -331,8 +339,32 @@ async function redefinirSenha(req, res) {
   }
 }
 
+function logout(req, res) {
+  const isProd = process.env.NODE_ENV === 'production';
+  res.clearCookie('cb_token', {
+    httpOnly: true,
+    secure:   isProd,
+    sameSite: isProd ? 'none' : 'lax',
+  });
+  res.json({ mensagem: 'Logout realizado' });
+}
+
+function tokenExtrato(req, res) {
+  try {
+    const token = jwt.sign(
+      { id: req.usuario.id, papel: req.usuario.papel, clienteId: req.usuario.clienteId },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
 module.exports = {
-  login, registrarPublico, verificarEmail, reenviarVerificacao,
+  login, logout, tokenExtrato,
+  registrarPublico, verificarEmail, reenviarVerificacao,
   registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario,
   minhaInfo, editarPerfil, alterarSenha, redefinirSenha,
 };
