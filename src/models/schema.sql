@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS saldo_inicial (
   UNIQUE(cliente_id, ano)
 );
 
+-- Verificação de e-mail e edição de perfil
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email_verificado BOOLEAN DEFAULT TRUE;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_verificacao VARCHAR(100);
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_expira_em TIMESTAMP;
+
 -- REGRAS DE CATEGORIZAÇÃO DE EXTRATO (aprendizado por cliente)
 CREATE TABLE IF NOT EXISTS regras_extrato (
   id           SERIAL PRIMARY KEY,
