@@ -39,4 +39,4 @@ async function salvarRegras(req, res) {
   }
 }
 
-module.exports = { processar, salvarRegras, extrairPalavraChave };
+module.exports = { processar, salvarRegras };
