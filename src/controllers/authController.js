@@ -7,7 +7,7 @@ const https  = require('https');
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function enviarEmailVerificacao(email, nome, token) {
-  const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://controle-de-bordo-react.vercel.app';
+  const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://www.souzfinance.com';
   const link = `${frontendUrl}/verificar?token=${token}`;
 
   const html = `
@@ -84,7 +84,7 @@ async function login(req, res) {
     );
 
     const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('cb_token', token, {
+    res.cookie('sf_token', token, {
       httpOnly: true,
       secure:   isProd,
       sameSite: isProd ? 'none' : 'lax',
@@ -350,7 +350,7 @@ async function redefinirSenha(req, res) {
 
 function logout(req, res) {
   const isProd = process.env.NODE_ENV === 'production';
-  res.clearCookie('cb_token', {
+  res.clearCookie('sf_token', {
     httpOnly: true,
     secure:   isProd,
     sameSite: isProd ? 'none' : 'lax',
