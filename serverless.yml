@@ -11,11 +11,12 @@ provider:
   environment:
     DATABASE_URL: ${env:DATABASE_URL}
     JWT_SECRET: ${env:JWT_SECRET}
-    CORS_ORIGIN: ${env:CORS_ORIGIN, 'https://controle-de-bordo-react.vercel.app'}
+    CORS_ORIGIN: ${env:CORS_ORIGIN, 'https://www.souzfinance.com'}
     BREVO_API_KEY: ${env:BREVO_API_KEY}
     ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
     GOOGLE_API_KEY: ${env:GOOGLE_API_KEY}
     FRONTEND_URL: ${env:FRONTEND_URL, 'https://controle-de-bordo-react.vercel.app'}
+    NODE_ENV: production
 
 functions:
   api:

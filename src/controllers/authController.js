@@ -91,7 +91,16 @@ async function login(req, res) {
       maxAge:   8 * 60 * 60 * 1000,
     });
 
-    res.json({ papel: usuario.papel, clienteId: usuario.cliente_id, nome: usuario.nome });
+    let cliente = null;
+    if (usuario.papel === 'cliente' && usuario.cliente_id) {
+      const { rows } = await pool.query(
+        'SELECT id, nome, cor, obs FROM clientes WHERE id = $1',
+        [usuario.cliente_id]
+      );
+      cliente = rows[0] || null;
+    }
+
+    res.json({ papel: usuario.papel, clienteId: usuario.cliente_id, nome: usuario.nome, cliente });
   } catch (err) {
     res.status(500).json({ erro: err.message });
   }
