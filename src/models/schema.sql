@@ -107,6 +107,14 @@ CREATE TABLE IF NOT EXISTS regras_extrato (
   UNIQUE(cliente_id, palavra_chave)
 );
 
+-- Migração: reset de senha
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_reset_senha VARCHAR(100);
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_reset_expira_em TIMESTAMP;
+
+-- Migração: controle de acesso e plano
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ativo BOOLEAN DEFAULT TRUE;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS plano VARCHAR(20) DEFAULT 'trial';
+
 -- CONTROLE DE UPGRADE
 CREATE TABLE IF NOT EXISTS aparelhos_upgrade (
   id               SERIAL PRIMARY KEY,

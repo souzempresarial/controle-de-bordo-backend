@@ -189,13 +189,30 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
     if (mime === 'application/pdf') {
       const textoRaw = await extrairTextoPDF(file.buffer);
       const todasLinhas = textoRaw.split('\n').map(l => l.trim()).filter(l => l.length > 1);
-      const isLixo = l =>
-        /agên|ag\.\s*\d|conta:/i.test(l) ||
-        /\bBCO\b|\bBANCO\b/i.test(l) ||
-        /S\.A\.\s*\(\d+\)/i.test(l) ||
-        /\bIP\s+(LTDA|S\.A\.)/i.test(l) ||
-        /^[\d]{4,}-[\d]{1,2}$/.test(l) ||
-        /^[*•.\-–—]+$/.test(l);
+      const PREFIXOS_TX = [
+        'transferência enviada pelo pix',
+        'transferência recebida pelo pix',
+        'transferência recebida',
+        'transferência enviada',
+        'transf enviada pelo pix',
+        'compra no débito',
+        'compra no crédito',
+        'pagamento efetuado',
+        'pagamento de boleto',
+        'débito automático',
+        'ted enviada',
+        'doc enviado',
+      ];
+      const isLixo = l => {
+        const low = l.toLowerCase();
+        if (PREFIXOS_TX.some(p => low.startsWith(p))) return false;
+        return /agên|ag\.\s*\d|conta:/i.test(l) ||
+          /\bBCO\b|\bBANCO\b/i.test(l) ||
+          /S\.A\.\s*\(\d+\)/i.test(l) ||
+          /\bIP\s+(LTDA|S\.A\.)/i.test(l) ||
+          /^[\d]{4,}-[\d]{1,2}$/.test(l) ||
+          /^[*•.\-–—]+$/.test(l);
+      };
       const linhasFiltradas = todasLinhas.filter(l => !isLixo(l));
       const linhasPeriodo   = filtrarPorPeriodo(linhasFiltradas, dataInicio, dataFim);
       // Normaliza espaços internos: pdf2json posiciona texto com centenas de espaços entre colunas

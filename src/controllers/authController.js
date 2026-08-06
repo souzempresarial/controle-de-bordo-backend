@@ -2,11 +2,11 @@ const pool   = require('../models/db');
 const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
 const crypto = require('crypto');
-const https  = require('https');
+const axios  = require('axios');
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function enviarEmailVerificacao(email, nome, token) {
+async function enviarEmailVerificacao(email, nome, token) {
   const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://www.souzfinance.com';
   const link = `${frontendUrl}/verificar?token=${token}`;
 
@@ -28,35 +28,18 @@ function enviarEmailVerificacao(email, nome, token) {
       </div>
     </div>`;
 
-  const body = JSON.stringify({
-    sender:      { name: 'SOUZ Finance', email: 'contato@souzempresarial.com' },
+  const emailData = {
+    sender:      { name: 'SOUZ Finance', email: 'erpsouz@gmail.com' },
     to:          [{ email, name: nome }],
     subject:     'Verifique seu e-mail — SOUZ Finance',
     htmlContent: html,
-  });
+  };
 
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'api.brevo.com',
-      path:     '/v3/smtp/email',
-      method:   'POST',
-      headers:  {
-        'api-key':        process.env.BREVO_API_KEY,
-        'Content-Type':   'application/json',
-        'Content-Length': Buffer.byteLength(body),
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve();
-        else reject(new Error(`Brevo ${res.statusCode}: ${data}`));
-      });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+  await axios.post(
+    process.env.BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL,
+    emailData,
+    { headers: { 'Content-Type': 'application/json', 'api-key': process.env.BRAVE_ENDPOINT_KEY } }
+  );
 }
 
 // ─── Login ───────────────────────────────────────────────────────────────────
@@ -247,7 +230,9 @@ async function criarUsuario(req, res) {
 async function listarUsuarios(req, res) {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.papel, u.cliente_id, u.nome, u.criado_em, u.email_verificado, c.nome AS cliente_nome
+      `SELECT u.id, u.email, u.papel, u.cliente_id, u.nome, u.criado_em, u.email_verificado,
+              COALESCE(u.ativo, true) AS ativo, COALESCE(u.plano, 'trial') AS plano,
+              c.nome AS cliente_nome
        FROM usuarios u LEFT JOIN clientes c ON c.id = u.cliente_id
        ORDER BY u.criado_em DESC`
     );
@@ -261,6 +246,32 @@ async function excluirUsuario(req, res) {
   try {
     await pool.query('DELETE FROM usuarios WHERE id = $1', [req.params.id]);
     res.json({ mensagem: 'Usuário excluído' });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+async function toggleAtivo(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  try {
+    const { rows } = await pool.query(
+      'UPDATE usuarios SET ativo = NOT COALESCE(ativo, true) WHERE id = $1 RETURNING COALESCE(ativo, true) AS ativo',
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ erro: 'Usuário não encontrado' });
+    res.json({ ativo: rows[0].ativo });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+async function atualizarPlano(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  const { plano } = req.body;
+  if (!['trial', 'ativo', 'suspenso'].includes(plano)) return res.status(400).json({ erro: 'Plano inválido' });
+  try {
+    await pool.query('UPDATE usuarios SET plano = $1 WHERE id = $2', [plano, req.params.id]);
+    res.json({ plano });
   } catch (err) {
     res.status(500).json({ erro: err.message });
   }
@@ -312,6 +323,89 @@ async function editarPerfil(req, res) {
     res.json({ mensagem: 'Perfil atualizado com sucesso' });
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ erro: 'E-mail já cadastrado' });
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+// ─── Esqueci minha senha ──────────────────────────────────────────────────────
+
+async function esqueceuSenha(req, res) {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ erro: 'E-mail obrigatório' });
+
+  try {
+    const { rows } = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
+    if (!rows.length) return res.json({ mensagem: 'Se o e-mail existir, você receberá um link em breve.' });
+
+    const usuario = rows[0];
+    const token  = crypto.randomBytes(32).toString('hex');
+    const expira = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+    await pool.query(
+      'UPDATE usuarios SET token_reset_senha = $1, token_reset_expira_em = $2 WHERE id = $3',
+      [token, expira, usuario.id]
+    );
+
+    const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://www.souzfinance.com';
+    const link = `${frontendUrl}/redefinir?token=${token}`;
+
+    const html = `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto">
+        <div style="background:#16a34a;padding:20px 28px;border-radius:10px 10px 0 0">
+          <h1 style="color:#fff;margin:0;font-size:20px;font-weight:800">SOUZ Finance</h1>
+          <p style="color:rgba(255,255,255,0.8);margin:4px 0 0;font-size:13px">Redefinição de senha</p>
+        </div>
+        <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-radius:0 0 10px 10px">
+          <p style="font-size:15px;color:#111">Olá, <strong>${usuario.nome || 'usuário'}</strong>!</p>
+          <p style="font-size:14px;color:#555">Recebemos uma solicitação para redefinir a senha da sua conta. Clique no botão abaixo para criar uma nova senha:</p>
+          <div style="text-align:center;margin:28px 0">
+            <a href="${link}" style="background:#16a34a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+              Redefinir senha
+            </a>
+          </div>
+          <p style="font-size:12px;color:#9ca3af">Este link expira em 1 hora. Se você não solicitou a redefinição, ignore este e-mail.</p>
+        </div>
+      </div>`;
+
+    const emailData = {
+      sender:      { name: 'SOUZ Finance', email: 'erpsouz@gmail.com' },
+      to:          [{ email: usuario.email, name: usuario.nome || '' }],
+      subject:     'Redefinição de senha — SOUZ Finance',
+      htmlContent: html,
+    };
+
+    await axios.post(
+      process.env.BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL,
+      emailData,
+      { headers: { 'Content-Type': 'application/json', 'api-key': process.env.BRAVE_ENDPOINT_KEY } }
+    );
+
+    res.json({ mensagem: 'Se o e-mail existir, você receberá um link em breve.' });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+async function redefinirSenhaPorToken(req, res) {
+  const { token, novaSenha } = req.body;
+  if (!token || !novaSenha) return res.status(400).json({ erro: 'Token e nova senha obrigatórios' });
+  if (novaSenha.length < 6) return res.status(400).json({ erro: 'Senha deve ter no mínimo 6 caracteres' });
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM usuarios WHERE token_reset_senha = $1 AND token_reset_expira_em > NOW()',
+      [token]
+    );
+    if (!rows.length) return res.status(400).json({ erro: 'Link inválido ou expirado. Solicite um novo.' });
+
+    const hash = await bcrypt.hash(novaSenha, 10);
+    await pool.query(
+      'UPDATE usuarios SET senha_hash = $1, token_reset_senha = NULL, token_reset_expira_em = NULL WHERE id = $2',
+      [hash, rows[0].id]
+    );
+
+    res.json({ mensagem: 'Senha redefinida com sucesso! Você já pode fazer login.' });
+  } catch (err) {
     res.status(500).json({ erro: err.message });
   }
 }
@@ -374,6 +468,7 @@ function tokenExtrato(req, res) {
 module.exports = {
   login, logout, tokenExtrato,
   registrarPublico, verificarEmail, reenviarVerificacao,
-  registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario,
+  esqueceuSenha, redefinirSenhaPorToken,
+  registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano,
   minhaInfo, editarPerfil, alterarSenha, redefinirSenha,
 };

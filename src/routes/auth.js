@@ -9,6 +9,8 @@ router.post('/logout',               controller.logout);
 router.post('/registro',             controller.registrarPublico);
 router.get('/verificar/:token',      controller.verificarEmail);
 router.post('/reenviar-verificacao', controller.reenviarVerificacao);
+router.post('/esqueci-senha',        controller.esqueceuSenha);
+router.post('/redefinir-senha-token', controller.redefinirSenhaPorToken);
 router.post('/registrar-admin',      controller.registrarAdmin);
 
 // Perfil do próprio usuário
@@ -22,5 +24,7 @@ router.post('/usuarios',              autenticar, controller.criarUsuario);
 router.get('/usuarios',               autenticar, controller.listarUsuarios);
 router.delete('/usuarios/:id',        autenticar, controller.excluirUsuario);
 router.put('/usuarios/:id/senha',     autenticar, controller.redefinirSenha);
+router.patch('/usuarios/:id/ativo',   autenticar, controller.toggleAtivo);
+router.put('/usuarios/:id/plano',     autenticar, controller.atualizarPlano);
 
 module.exports = router;

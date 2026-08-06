@@ -17,6 +17,10 @@ provider:
     GOOGLE_API_KEY: ${env:GOOGLE_API_KEY}
     FRONTEND_URL: ${env:FRONTEND_URL, 'https://controle-de-bordo-react.vercel.app'}
     NODE_ENV: production
+    SENTRY_DSN: ${env:SENTRY_DSN}
+    NODE_OPTIONS: '--import @sentry/aws-serverless/awslambda-auto'
+    BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL: ${env:BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL}
+    BRAVE_ENDPOINT_KEY: ${env:BRAVE_ENDPOINT_KEY}
 
 functions:
   api:
