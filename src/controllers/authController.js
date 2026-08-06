@@ -277,6 +277,23 @@ async function atualizarPlano(req, res) {
   }
 }
 
+async function atualizarEmail(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  const { email } = req.body;
+  if (!email || !email.includes('@')) return res.status(400).json({ erro: 'Email inválido' });
+  try {
+    const { rows } = await pool.query(
+      'UPDATE usuarios SET email = $1 WHERE id = $2 RETURNING email',
+      [email.toLowerCase().trim(), req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ erro: 'Usuário não encontrado' });
+    res.json({ email: rows[0].email });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ erro: 'Este email já está em uso' });
+    res.status(500).json({ erro: err.message });
+  }
+}
+
 // ─── Perfil do próprio usuário ────────────────────────────────────────────────
 
 async function minhaInfo(req, res) {
@@ -469,6 +486,6 @@ module.exports = {
   login, logout, tokenExtrato,
   registrarPublico, verificarEmail, reenviarVerificacao,
   esqueceuSenha, redefinirSenhaPorToken,
-  registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano,
+  registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano, atualizarEmail,
   minhaInfo, editarPerfil, alterarSenha, redefinirSenha,
 };
