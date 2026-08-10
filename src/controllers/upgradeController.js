@@ -66,7 +66,7 @@ async function excluir(req, res) {
 async function vender(req, res) {
   try {
     const { clienteId, aparelhoId } = req.params;
-    const { valor_venda, data, pagamento } = req.body;
+    const { valor_venda, data, pagamento, valor_recebido } = req.body;
     if (!valor_venda || parseFloat(valor_venda) <= 0) return res.status(400).json({ erro: 'Valor de venda obrigatório' });
 
     const { rows } = await pool.query('SELECT * FROM aparelhos_upgrade WHERE id=$1 AND cliente_id=$2', [aparelhoId, clienteId]);
@@ -77,11 +77,12 @@ async function vender(req, res) {
     const dataVenda = data || new Date().toISOString().slice(0, 10);
     const descricao = [ap.modelo, ap.armazenamento, ap.cor].filter(Boolean).join(' ');
     const grupoId   = 'upg' + Date.now();
+    const recebido  = valor_recebido != null && parseFloat(valor_recebido) > 0 ? parseFloat(valor_recebido) : null;
 
     await pool.query(
-      `INSERT INTO lancamentos (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, grupo_id, is_cmv)
-       VALUES ($1,'Entrada',$2,$3,'Receita de Vendas','Upgrade',$4,$5,'Confirmado',$6,false)`,
-      [clienteId, parseFloat(valor_venda), dataVenda, descricao, pagamento||null, grupoId]
+      `INSERT INTO lancamentos (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, grupo_id, is_cmv, valor_recebido)
+       VALUES ($1,'Entrada',$2,$3,'Receita de Vendas','Upgrade',$4,$5,'Confirmado',$6,false,$7)`,
+      [clienteId, parseFloat(valor_venda), dataVenda, descricao, pagamento||null, grupoId, recebido]
     );
 
     if (ap.valor_avaliado && parseFloat(ap.valor_avaliado) > 0) {
