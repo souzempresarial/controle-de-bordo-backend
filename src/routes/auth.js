@@ -20,6 +20,7 @@ router.put('/senha',          autenticar, controller.alterarSenha);
 router.post('/token-extrato', autenticar, controller.tokenExtrato);
 
 // Admin
+router.get('/log-acessos',            autenticar, controller.listarLogAcessos);
 router.post('/usuarios',              autenticar, controller.criarUsuario);
 router.get('/usuarios',               autenticar, controller.listarUsuarios);
 router.delete('/usuarios/:id',        autenticar, controller.excluirUsuario);

@@ -46,8 +46,17 @@ async function enviarEmailVerificacao(email, nome, token) {
 
 async function login(req, res) {
   try {
-    const { email, senha } = req.body;
+    const { email, senha, turnstileToken } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Email e senha obrigatórios' });
+
+    if (process.env.TURNSTILE_SECRET_KEY) {
+      const verify = await axios.post(
+        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        new URLSearchParams({ secret: process.env.TURNSTILE_SECRET_KEY, response: turnstileToken || '', remoteip: req.ip }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      if (!verify.data.success) console.warn('[Turnstile] verificação falhou:', verify.data['error-codes'], 'ip:', req.ip);
+    }
 
     const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
     const usuario = result.rows[0];
@@ -73,6 +82,17 @@ async function login(req, res) {
       sameSite: isProd ? 'none' : 'lax',
       maxAge:   8 * 60 * 60 * 1000,
     });
+
+    // Registrar acesso
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+    pool.query(
+      'UPDATE usuarios SET ultimo_acesso = NOW(), ultimo_ip = $1 WHERE id = $2',
+      [ip, usuario.id]
+    ).catch(() => {});
+    pool.query(
+      'INSERT INTO log_acessos (usuario_id, email, nome, ip) VALUES ($1, $2, $3, $4)',
+      [usuario.id, usuario.email, usuario.nome || null, ip]
+    ).catch(() => {});
 
     let cliente = null;
     if (usuario.papel === 'cliente' && usuario.cliente_id) {
@@ -294,6 +314,26 @@ async function atualizarEmail(req, res) {
   }
 }
 
+// ─── Log de acessos (admin) ───────────────────────────────────────────────────
+
+async function listarLogAcessos(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT l.id, l.email, l.nome, l.ip, l.data_hora,
+              c.nome AS cliente_nome
+       FROM log_acessos l
+       LEFT JOIN usuarios u ON u.id = l.usuario_id
+       LEFT JOIN clientes c ON c.id = u.cliente_id
+       ORDER BY l.data_hora DESC
+       LIMIT 300`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
 // ─── Perfil do próprio usuário ────────────────────────────────────────────────
 
 async function minhaInfo(req, res) {
@@ -488,4 +528,5 @@ module.exports = {
   esqueceuSenha, redefinirSenhaPorToken,
   registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano, atualizarEmail,
   minhaInfo, editarPerfil, alterarSenha, redefinirSenha,
+  listarLogAcessos,
 };
