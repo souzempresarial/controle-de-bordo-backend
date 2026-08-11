@@ -110,4 +110,13 @@ async function vender(req, res) {
   }
 }
 
-module.exports = { listar, criar, editar, excluir, vender };
+async function limpar(req, res) {
+  try {
+    await pool.query('DELETE FROM aparelhos_upgrade WHERE cliente_id=$1', [req.params.clienteId]);
+    res.json({ mensagem: 'Aparelhos removidos' });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+module.exports = { listar, criar, editar, excluir, vender, limpar };
