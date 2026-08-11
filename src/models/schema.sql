@@ -129,5 +129,7 @@ CREATE TABLE IF NOT EXISTS aparelhos_upgrade (
   valor_pretendido DECIMAL(12,2),
   status           VARCHAR(20) DEFAULT 'estoque',
   criado_em        TIMESTAMP DEFAULT NOW(),
-  vendido_em       TIMESTAMP
+  vendido_em       TIMESTAMP,
+  imei             VARCHAR(20)
 );
+ALTER TABLE aparelhos_upgrade ADD COLUMN IF NOT EXISTS imei VARCHAR(20);

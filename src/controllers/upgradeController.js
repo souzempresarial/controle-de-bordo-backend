@@ -24,12 +24,13 @@ async function listar(req, res) {
 async function criar(req, res) {
   try {
     const { clienteId } = req.params;
-    const { modelo, cor, armazenamento, bateria, email_aparelho, observacoes, valor_avaliado, valor_pretendido } = req.body;
+    const { modelo, cor, armazenamento, bateria, email_aparelho, observacoes, valor_avaliado, valor_pretendido, data_entrada, imei } = req.body;
     if (!modelo) return res.status(400).json({ erro: 'Modelo obrigatório' });
+    const criadoEm = data_entrada || new Date().toISOString().slice(0, 10);
     const { rows } = await pool.query(
-      `INSERT INTO aparelhos_upgrade (cliente_id, modelo, cor, armazenamento, bateria, email_aparelho, observacoes, valor_avaliado, valor_pretendido)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [clienteId, modelo, cor||null, armazenamento||null, bateria||null, email_aparelho||null, observacoes||null, valor_avaliado||null, valor_pretendido||null]
+      `INSERT INTO aparelhos_upgrade (cliente_id, modelo, cor, armazenamento, bateria, email_aparelho, observacoes, valor_avaliado, valor_pretendido, criado_em, imei)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [clienteId, modelo, cor||null, armazenamento||null, bateria||null, email_aparelho||null, observacoes||null, valor_avaliado||null, valor_pretendido||null, criadoEm, imei||null]
     );
     res.status(201).json({ ...rows[0], statusAuto: calcStatus(rows[0]) });
   } catch (err) {
@@ -40,12 +41,17 @@ async function criar(req, res) {
 async function editar(req, res) {
   try {
     const { clienteId, aparelhoId } = req.params;
-    const { modelo, cor, armazenamento, bateria, email_aparelho, observacoes, valor_avaliado, valor_pretendido } = req.body;
+    const { modelo, cor, armazenamento, bateria, email_aparelho, observacoes, valor_avaliado, valor_pretendido, data_entrada, imei } = req.body;
+    const params = [modelo, cor||null, armazenamento||null, bateria||null, email_aparelho||null, observacoes||null, valor_avaliado||null, valor_pretendido||null, imei||null];
+    let set = 'modelo=$1, cor=$2, armazenamento=$3, bateria=$4, email_aparelho=$5, observacoes=$6, valor_avaliado=$7, valor_pretendido=$8, imei=$9';
+    if (data_entrada) {
+      params.push(data_entrada);
+      set += `, criado_em=$${params.length}`;
+    }
+    params.push(aparelhoId, clienteId);
     const { rows } = await pool.query(
-      `UPDATE aparelhos_upgrade
-       SET modelo=$1, cor=$2, armazenamento=$3, bateria=$4, email_aparelho=$5, observacoes=$6, valor_avaliado=$7, valor_pretendido=$8
-       WHERE id=$9 AND cliente_id=$10 RETURNING *`,
-      [modelo, cor||null, armazenamento||null, bateria||null, email_aparelho||null, observacoes||null, valor_avaliado||null, valor_pretendido||null, aparelhoId, clienteId]
+      `UPDATE aparelhos_upgrade SET ${set} WHERE id=$${params.length - 1} AND cliente_id=$${params.length} RETURNING *`,
+      params
     );
     if (!rows.length) return res.status(404).json({ erro: 'Aparelho não encontrado' });
     res.json({ ...rows[0], statusAuto: calcStatus(rows[0]) });
