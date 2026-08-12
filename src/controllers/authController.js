@@ -122,7 +122,8 @@ async function login(req, res) {
       permissoes: usuario.permissoes || null,
     });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -133,6 +134,10 @@ async function registrarPublico(req, res) {
   if (!nome || !email || !senha) return res.status(400).json({ erro: 'Nome, e-mail e senha obrigatórios' });
   if (senha.length < 6) return res.status(400).json({ erro: 'Senha deve ter no mínimo 6 caracteres' });
 
+  const hash  = await bcrypt.hash(senha, 10);
+  const token = crypto.randomBytes(32).toString('hex');
+  const expira = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -141,10 +146,6 @@ async function registrarPublico(req, res) {
       'INSERT INTO clientes (nome) VALUES ($1) RETURNING id',
       [nome]
     );
-
-    const hash  = await bcrypt.hash(senha, 10);
-    const token = crypto.randomBytes(32).toString('hex');
-    const expira = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await client.query(
       `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, token_verificacao, token_expira_em)
@@ -164,7 +165,8 @@ async function registrarPublico(req, res) {
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(400).json({ erro: 'E-mail já cadastrado' });
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   } finally {
     client.release();
   }
@@ -189,7 +191,8 @@ async function verificarEmail(req, res) {
 
     res.json({ mensagem: 'E-mail verificado com sucesso! Você já pode fazer login.' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -215,7 +218,9 @@ async function reenviarVerificacao(req, res) {
       [token, expira, usuario.id]
     );
 
-    try { await enviarEmailVerificacao(usuario.email, usuario.nome || '', token); } catch {}
+    try { await enviarEmailVerificacao(usuario.email, usuario.nome || '', token); } catch (emailErr) {
+      console.error('[reenviarVerificacao] email falhou:', emailErr.message);
+    }
     res.json({ mensagem: 'Novo link de verificação enviado.' });
   } catch (err) {
     console.error('[reenviarVerificacao]', err.message);
@@ -241,7 +246,8 @@ async function registrarAdmin(req, res) {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ erro: 'Email já cadastrado' });
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -283,7 +289,8 @@ async function atualizarPermissoes(req, res) {
     if (!rows.length) return res.status(404).json({ erro: 'Usuário não encontrado' });
     res.json({ permissoes: rows[0].permissoes });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -299,7 +306,8 @@ async function listarUsuarios(req, res) {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -309,7 +317,8 @@ async function excluirUsuario(req, res) {
     await pool.query('DELETE FROM usuarios WHERE id = $1', [req.params.id]);
     res.json({ mensagem: 'Usuário excluído' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -323,7 +332,8 @@ async function toggleAtivo(req, res) {
     if (!rows.length) return res.status(404).json({ erro: 'Usuário não encontrado' });
     res.json({ ativo: rows[0].ativo });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -335,7 +345,8 @@ async function atualizarPlano(req, res) {
     await pool.query('UPDATE usuarios SET plano = $1 WHERE id = $2', [plano, req.params.id]);
     res.json({ plano });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -352,7 +363,8 @@ async function atualizarEmail(req, res) {
     res.json({ email: rows[0].email });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ erro: 'Este email já está em uso' });
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -372,7 +384,8 @@ async function listarLogAcessos(req, res) {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -386,7 +399,8 @@ async function minhaInfo(req, res) {
     );
     res.json(rows[0] || {});
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -424,7 +438,8 @@ async function editarPerfil(req, res) {
     res.json({ mensagem: 'Perfil atualizado com sucesso' });
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ erro: 'E-mail já cadastrado' });
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -512,7 +527,8 @@ async function redefinirSenhaPorToken(req, res) {
 
     res.json({ mensagem: 'Senha redefinida com sucesso! Você já pode fazer login.' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -536,7 +552,8 @@ async function alterarSenha(req, res) {
     await pool.query('UPDATE usuarios SET senha_hash = $1 WHERE id = $2', [hash, req.usuario.id]);
     res.json({ mensagem: 'Senha alterada com sucesso' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -549,7 +566,8 @@ async function redefinirSenha(req, res) {
     await pool.query('UPDATE usuarios SET senha_hash = $1 WHERE id = $2', [hash, req.params.id]);
     res.json({ mensagem: 'Senha redefinida com sucesso' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -572,7 +590,8 @@ function tokenExtrato(req, res) {
     );
     res.json({ token });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[auth]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

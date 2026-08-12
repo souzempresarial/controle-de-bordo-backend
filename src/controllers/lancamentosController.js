@@ -20,12 +20,13 @@ async function criar(req, res) {
   try {
     const { clienteId } = req.params;
     const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade } = req.body;
-    if (!tipo || valor === undefined || valor === null || valor === '' || !data) return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
+    const valorNum = parseFloat(valor);
+    if (!tipo || !data || isNaN(valorNum) || valorNum <= 0) return res.status(400).json({ erro: 'Tipo, valor (positivo) e data são obrigatórios' });
     const result = await pool.query(
       `INSERT INTO lancamentos
         (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-      [clienteId, tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null, valor_upgrade||null, qtd_upgrade||null]
+      [clienteId, tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null, valor_upgrade||null, qtd_upgrade||null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
