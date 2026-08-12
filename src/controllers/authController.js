@@ -59,7 +59,10 @@ async function login(req, res) {
         new URLSearchParams({ secret: process.env.TURNSTILE_SECRET_KEY, response: turnstileToken || '', remoteip: req.ip }),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
       );
-      if (!verify.data.success) console.warn('[Turnstile] verificação falhou:', verify.data['error-codes'], 'ip:', req.ip);
+      if (!verify.data.success) {
+        console.warn('[Turnstile] verificação falhou:', verify.data['error-codes'], 'ip:', req.ip);
+        return res.status(403).json({ erro: 'Verificação de segurança falhou. Recarregue a página e tente novamente.' });
+      }
     }
 
     const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);

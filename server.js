@@ -2,6 +2,8 @@ require('dotenv').config();
 const express      = require('express');
 const cors         = require('cors');
 const cookieParser = require('cookie-parser');
+const helmet       = require('helmet');
+const rateLimit    = require('express-rate-limit');
 const fs           = require('fs');
 const path         = require('path');
 const pool         = require('./src/models/db');
@@ -10,6 +12,27 @@ const autorizar    = require('./src/middleware/autorizar');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// Segurança: headers HTTP
+app.use(helmet({ contentSecurityPolicy: false })); // CSP desabilitado — API pura, sem HTML
+
+// Rate limiting por IP — em Lambda cada instância tem memória isolada,
+// então o limite é por instância, não global. Ainda assim protege contra
+// brute force que aterrissar na mesma instância.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { erro: 'Muitas tentativas. Aguarde 15 minutos.' },
+});
+const resetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { erro: 'Muitas solicitações de redefinição. Aguarde 1 hora.' },
+});
 
 // Criar tabelas automaticamente na inicialização
 const sql = fs.readFileSync(path.join(__dirname, 'src/models/schema.sql'), 'utf8');
@@ -33,6 +56,11 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => res.json({ status: 'ok', message: 'Controle de Bordo API' }));
+
+// Rate limit nas rotas sensíveis antes do router
+app.use('/auth/login',         loginLimiter);
+app.use('/auth/esqueci-senha', resetLimiter);
+app.use('/auth/registro',      resetLimiter);
 
 // Rotas públicas
 app.use('/auth',  require('./src/routes/auth'));
