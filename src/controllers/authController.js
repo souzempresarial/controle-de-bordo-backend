@@ -69,6 +69,10 @@ async function login(req, res) {
       return res.status(403).json({ erro: 'Confirme seu e-mail antes de fazer login. Verifique sua caixa de entrada.' });
     }
 
+    if (usuario.ativo === false) {
+      return res.status(403).json({ erro: 'Conta desativada. Entre em contato com o suporte.' });
+    }
+
     const token = jwt.sign(
       { id: usuario.id, papel: usuario.papel, clienteId: usuario.cliente_id },
       process.env.JWT_SECRET,
@@ -95,7 +99,7 @@ async function login(req, res) {
     ).catch(() => {});
 
     let cliente = null;
-    if (usuario.papel === 'cliente' && usuario.cliente_id) {
+    if ((usuario.papel === 'cliente' || usuario.papel === 'funcionario') && usuario.cliente_id) {
       const { rows } = await pool.query(
         'SELECT id, nome, cor, obs FROM clientes WHERE id = $1',
         [usuario.cliente_id]
@@ -103,7 +107,13 @@ async function login(req, res) {
       cliente = rows[0] || null;
     }
 
-    res.json({ papel: usuario.papel, clienteId: usuario.cliente_id, nome: usuario.nome, cliente });
+    res.json({
+      papel: usuario.papel,
+      clienteId: usuario.cliente_id,
+      nome: usuario.nome,
+      cliente,
+      permissoes: usuario.permissoes || null,
+    });
   } catch (err) {
     res.status(500).json({ erro: err.message });
   }
@@ -230,15 +240,19 @@ async function registrarAdmin(req, res) {
 // ─── Gestão de usuários (admin) ───────────────────────────────────────────────
 
 async function criarUsuario(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
-    const { email, senha, clienteId, nome } = req.body;
+    const { email, senha, clienteId, nome, papel: papelBody, permissoes } = req.body;
     if (!email || !senha || !clienteId) return res.status(400).json({ erro: 'Email, senha e clienteId obrigatórios' });
+
+    const papelFinal = papelBody === 'funcionario' ? 'funcionario' : 'cliente';
+    const permFinal  = papelFinal === 'funcionario' && Array.isArray(permissoes) ? JSON.stringify(permissoes) : null;
 
     const hash = await bcrypt.hash(senha, 10);
     const result = await pool.query(
-      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado)
-       VALUES ($1,$2,'cliente',$3,$4,true) RETURNING id, email, papel, cliente_id, nome`,
-      [email.toLowerCase(), hash, clienteId, nome || null]
+      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, permissoes)
+       VALUES ($1,$2,$3,$4,$5,true,$6) RETURNING id, email, papel, cliente_id, nome`,
+      [email.toLowerCase(), hash, papelFinal, clienteId, nome || null, permFinal]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -247,12 +261,29 @@ async function criarUsuario(req, res) {
   }
 }
 
+async function atualizarPermissoes(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  const { permissoes } = req.body;
+  if (!Array.isArray(permissoes)) return res.status(400).json({ erro: 'permissoes deve ser um array' });
+  try {
+    const { rows } = await pool.query(
+      'UPDATE usuarios SET permissoes = $1 WHERE id = $2 RETURNING id, permissoes',
+      [JSON.stringify(permissoes), req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ erro: 'Usuário não encontrado' });
+    res.json({ permissoes: rows[0].permissoes });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
+
 async function listarUsuarios(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.papel, u.cliente_id, u.nome, u.criado_em, u.email_verificado,
               COALESCE(u.ativo, true) AS ativo, COALESCE(u.plano, 'trial') AS plano,
-              c.nome AS cliente_nome
+              c.nome AS cliente_nome, u.permissoes
        FROM usuarios u LEFT JOIN clientes c ON c.id = u.cliente_id
        ORDER BY u.criado_em DESC`
     );
@@ -263,6 +294,7 @@ async function listarUsuarios(req, res) {
 }
 
 async function excluirUsuario(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     await pool.query('DELETE FROM usuarios WHERE id = $1', [req.params.id]);
     res.json({ mensagem: 'Usuário excluído' });
@@ -472,6 +504,9 @@ async function redefinirSenhaPorToken(req, res) {
 async function alterarSenha(req, res) {
   try {
     const { senhaAtual, novaSenha } = req.body;
+    if (!senhaAtual || !novaSenha) return res.status(400).json({ erro: 'Senha atual e nova senha são obrigatórias' });
+    if (novaSenha.length < 6) return res.status(400).json({ erro: 'Senha deve ter no mínimo 6 caracteres' });
+
     const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [req.usuario.id]);
     const usuario = result.rows[0];
 
@@ -488,6 +523,7 @@ async function alterarSenha(req, res) {
 }
 
 async function redefinirSenha(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { novaSenha } = req.body;
     if (!novaSenha || novaSenha.length < 6) return res.status(400).json({ erro: 'Senha deve ter no mínimo 6 caracteres' });
@@ -526,7 +562,7 @@ module.exports = {
   login, logout, tokenExtrato,
   registrarPublico, verificarEmail, reenviarVerificacao,
   esqueceuSenha, redefinirSenhaPorToken,
-  registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano, atualizarEmail,
+  registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano, atualizarEmail, atualizarPermissoes,
   minhaInfo, editarPerfil, alterarSenha, redefinirSenha,
   listarLogAcessos,
 };
