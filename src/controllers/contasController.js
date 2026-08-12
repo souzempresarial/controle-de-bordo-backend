@@ -67,7 +67,7 @@ async function excluirEmMassa(req, res) {
     const { clienteId } = req.params;
     const { categoria } = req.query;
     const result = await pool.query(
-      `DELETE FROM contas WHERE cliente_id = $1 AND status = 'pendente'${categoria ? " AND categoria = $2" : ""} RETURNING id`,
+      `DELETE FROM contas WHERE cliente_id = $1 AND tipo = 'pagar' AND status = 'pendente'${categoria ? " AND categoria = $2" : ""} RETURNING id`,
       categoria ? [clienteId, categoria] : [clienteId]
     );
     res.json({ deletados: result.rowCount });

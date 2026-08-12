@@ -10,7 +10,8 @@ async function buscar(req, res) {
     );
     res.json(result.rows[0] || { valor: 0, mes: 0 });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[saldo.buscar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -27,7 +28,8 @@ async function salvar(req, res) {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[saldo.salvar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

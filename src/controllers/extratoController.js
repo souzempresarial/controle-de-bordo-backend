@@ -10,7 +10,7 @@ async function processar(req, res) {
     res.json({ transacoes });
   } catch (err) {
     console.error('[Extrato]', err.message);
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -35,7 +35,7 @@ async function salvarRegras(req, res) {
     res.json({ ok: true });
   } catch (err) {
     console.error('[Regras]', err.message);
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

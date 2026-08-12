@@ -17,7 +17,8 @@ async function listar(req, res) {
     );
     res.json(rows.map(a => ({ ...a, statusAuto: calcStatus(a) })));
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[upgrade.listar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -34,7 +35,8 @@ async function criar(req, res) {
     );
     res.status(201).json({ ...rows[0], statusAuto: calcStatus(rows[0]) });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[upgrade.criar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -56,16 +58,22 @@ async function editar(req, res) {
     if (!rows.length) return res.status(404).json({ erro: 'Aparelho não encontrado' });
     res.json({ ...rows[0], statusAuto: calcStatus(rows[0]) });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[upgrade.editar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
 async function excluir(req, res) {
   try {
-    await pool.query('DELETE FROM aparelhos_upgrade WHERE id=$1 AND cliente_id=$2', [req.params.aparelhoId, req.params.clienteId]);
+    const result = await pool.query(
+      'DELETE FROM aparelhos_upgrade WHERE id=$1 AND cliente_id=$2',
+      [req.params.aparelhoId, req.params.clienteId]
+    );
+    if (!result.rowCount) return res.status(404).json({ erro: 'Aparelho não encontrado' });
     res.json({ mensagem: 'Aparelho excluído' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[upgrade.excluir]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -100,13 +108,14 @@ async function vender(req, res) {
     }
 
     const { rows: updated } = await pool.query(
-      `UPDATE aparelhos_upgrade SET status='vendido', vendido_em=NOW() WHERE id=$1 RETURNING *`,
-      [aparelhoId]
+      `UPDATE aparelhos_upgrade SET status='vendido', vendido_em=NOW() WHERE id=$1 AND cliente_id=$2 RETURNING *`,
+      [aparelhoId, clienteId]
     );
 
     res.json({ ...updated[0], statusAuto: 'VENDIDO' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[upgrade.vender]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -115,7 +124,8 @@ async function limpar(req, res) {
     await pool.query('DELETE FROM aparelhos_upgrade WHERE cliente_id=$1', [req.params.clienteId]);
     res.json({ mensagem: 'Aparelhos removidos' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[upgrade.limpar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

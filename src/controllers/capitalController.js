@@ -11,7 +11,8 @@ async function buscar(req, res) {
     result.rows.forEach(r => { dados[r.campo] = parseFloat(r.valor); });
     res.json(dados);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[capital.buscar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -27,7 +28,8 @@ async function salvar(req, res) {
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[capital.salvar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

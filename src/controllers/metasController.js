@@ -10,7 +10,8 @@ async function listar(req, res) {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[metas.listar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -28,7 +29,8 @@ async function salvar(req, res) {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[metas.salvar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

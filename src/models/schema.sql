@@ -134,13 +134,13 @@ CREATE TABLE IF NOT EXISTS aparelhos_upgrade (
 );
 ALTER TABLE aparelhos_upgrade ADD COLUMN IF NOT EXISTS imei VARCHAR(20);
 
--- Migração: corrigir UNIQUE do saldo_inicial para incluir mes
-ALTER TABLE saldo_inicial DROP CONSTRAINT IF EXISTS saldo_inicial_cliente_id_ano_key;
+-- Migração: restaurar UNIQUE(cliente_id, ano) no saldo_inicial (revertendo erro anterior)
+ALTER TABLE saldo_inicial DROP CONSTRAINT IF EXISTS saldo_inicial_cliente_id_ano_mes_key;
 DO $$ BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'saldo_inicial_cliente_id_ano_mes_key'
+    SELECT 1 FROM pg_constraint WHERE conname = 'saldo_inicial_cliente_id_ano_key'
   ) THEN
-    ALTER TABLE saldo_inicial ADD CONSTRAINT saldo_inicial_cliente_id_ano_mes_key UNIQUE (cliente_id, ano, mes);
+    ALTER TABLE saldo_inicial ADD CONSTRAINT saldo_inicial_cliente_id_ano_key UNIQUE (cliente_id, ano);
   END IF;
 END $$;
 
