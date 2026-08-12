@@ -6,6 +6,10 @@ const axios  = require('axios');
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 async function enviarEmailVerificacao(email, nome, token) {
   const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://www.souzfinance.com';
   const link = `${frontendUrl}/verificar?token=${token}`;
@@ -17,7 +21,7 @@ async function enviarEmailVerificacao(email, nome, token) {
         <p style="color:rgba(255,255,255,0.8);margin:4px 0 0;font-size:13px">Verificação de e-mail</p>
       </div>
       <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-radius:0 0 10px 10px">
-        <p style="font-size:15px;color:#111">Olá, <strong>${nome}</strong>!</p>
+        <p style="font-size:15px;color:#111">Olá, <strong>${escHtml(nome)}</strong>!</p>
         <p style="font-size:14px;color:#555">Clique no botão abaixo para verificar seu e-mail e ativar sua conta no SOUZ Finance:</p>
         <div style="text-align:center;margin:28px 0">
           <a href="${link}" style="background:#16a34a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
@@ -445,7 +449,7 @@ async function esqueceuSenha(req, res) {
           <p style="color:rgba(255,255,255,0.8);margin:4px 0 0;font-size:13px">Redefinição de senha</p>
         </div>
         <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-radius:0 0 10px 10px">
-          <p style="font-size:15px;color:#111">Olá, <strong>${usuario.nome || 'usuário'}</strong>!</p>
+          <p style="font-size:15px;color:#111">Olá, <strong>${escHtml(usuario.nome || 'usuário')}</strong>!</p>
           <p style="font-size:14px;color:#555">Recebemos uma solicitação para redefinir a senha da sua conta. Clique no botão abaixo para criar uma nova senha:</p>
           <div style="text-align:center;margin:28px 0">
             <a href="${link}" style="background:#16a34a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">

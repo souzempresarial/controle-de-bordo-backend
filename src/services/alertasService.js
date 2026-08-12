@@ -1,6 +1,10 @@
 const https = require('https');
 const pool  = require('../models/db');
 
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function fmtBRL(v) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 }
@@ -55,9 +59,9 @@ function buildHTML(vencimentos, hoje) {
       <tbody>
         ${rows.map(r => `
           <tr style="border-bottom:1px solid #f3f4f6">
-            <td style="padding:8px 12px;font-weight:600">${r.cliente_nome}</td>
-            <td style="padding:8px 12px;color:#555">${r.categoria || '—'}</td>
-            <td style="padding:8px 12px;color:#555">${r.descricao || r.subcategoria || '—'}</td>
+            <td style="padding:8px 12px;font-weight:600">${escHtml(r.cliente_nome)}</td>
+            <td style="padding:8px 12px;color:#555">${escHtml(r.categoria) || '—'}</td>
+            <td style="padding:8px 12px;color:#555">${escHtml(r.descricao || r.subcategoria) || '—'}</td>
             <td style="padding:8px 12px;text-align:right;font-weight:700;color:#dc2626">${fmtBRL(r.valor)}</td>
             <td style="padding:8px 12px;text-align:center">${fmtData(r.data)}</td>
           </tr>
