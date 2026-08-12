@@ -215,10 +215,11 @@ async function reenviarVerificacao(req, res) {
       [token, expira, usuario.id]
     );
 
-    await enviarEmailVerificacao(usuario.email, usuario.nome || '', token);
+    try { await enviarEmailVerificacao(usuario.email, usuario.nome || '', token); } catch {}
     res.json({ mensagem: 'Novo link de verificação enviado.' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[reenviarVerificacao]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -264,7 +265,9 @@ async function criarUsuario(req, res) {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ erro: 'Email já cadastrado' });
-    res.status(500).json({ erro: err.message });
+    if (err.code === '23503') return res.status(400).json({ erro: 'Cliente não encontrado' });
+    console.error('[criarUsuario]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -399,6 +402,8 @@ async function editarPerfil(req, res) {
     if (nome !== undefined) { sets.push(`nome = $${idx++}`); vals.push(nome); }
 
     if (email && email.toLowerCase() !== usuario.email) {
+      if (!email.includes('@') || !email.split('@')[1]?.includes('.'))
+        return res.status(400).json({ erro: 'Formato de e-mail inválido' });
       if (!senhaAtual || !await bcrypt.compare(senhaAtual, usuario.senha_hash))
         return res.status(401).json({ erro: 'Senha atual incorreta' });
       sets.push(`email = $${idx++}`); vals.push(email.toLowerCase());
@@ -470,15 +475,20 @@ async function esqueceuSenha(req, res) {
       htmlContent: html,
     };
 
-    await axios.post(
-      process.env.BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL,
-      emailData,
-      { headers: { 'Content-Type': 'application/json', 'api-key': process.env.BRAVE_ENDPOINT_KEY } }
-    );
+    try {
+      await axios.post(
+        process.env.BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL,
+        emailData,
+        { headers: { 'Content-Type': 'application/json', 'api-key': process.env.BRAVE_ENDPOINT_KEY } }
+      );
+    } catch (emailErr) {
+      console.error('[esqueceuSenha] email falhou:', emailErr.message);
+    }
 
     res.json({ mensagem: 'Se o e-mail existir, você receberá um link em breve.' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[esqueceuSenha]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -516,6 +526,7 @@ async function alterarSenha(req, res) {
 
     const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [req.usuario.id]);
     const usuario = result.rows[0];
+    if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado' });
 
     if (!await bcrypt.compare(senhaAtual, usuario.senha_hash)) {
       return res.status(401).json({ erro: 'Senha atual incorreta' });

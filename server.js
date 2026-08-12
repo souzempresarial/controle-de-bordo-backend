@@ -58,9 +58,11 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/', (req, res) => res.json({ status: 'ok', message: 'Controle de Bordo API' }));
 
 // Rate limit nas rotas sensíveis antes do router
-app.use('/auth/login',         loginLimiter);
-app.use('/auth/esqueci-senha', resetLimiter);
-app.use('/auth/registro',      resetLimiter);
+app.use('/auth/login',                 loginLimiter);
+app.use('/auth/esqueci-senha',         resetLimiter);
+app.use('/auth/registro',              resetLimiter);
+app.use('/auth/reenviar-verificacao',  resetLimiter);
+app.use('/auth/registrar-admin',       resetLimiter);
 
 // Rotas públicas
 app.use('/auth',  require('./src/routes/auth'));

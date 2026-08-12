@@ -134,6 +134,16 @@ CREATE TABLE IF NOT EXISTS aparelhos_upgrade (
 );
 ALTER TABLE aparelhos_upgrade ADD COLUMN IF NOT EXISTS imei VARCHAR(20);
 
+-- Migração: corrigir UNIQUE do saldo_inicial para incluir mes
+ALTER TABLE saldo_inicial DROP CONSTRAINT IF EXISTS saldo_inicial_cliente_id_ano_key;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'saldo_inicial_cliente_id_ano_mes_key'
+  ) THEN
+    ALTER TABLE saldo_inicial ADD CONSTRAINT saldo_inicial_cliente_id_ano_mes_key UNIQUE (cliente_id, ano, mes);
+  END IF;
+END $$;
+
 -- Migração: permissões de funcionário
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes JSONB DEFAULT NULL;
 

@@ -7,7 +7,7 @@ module.exports = async function autenticar(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await pool.query('SELECT ativo, permissoes FROM usuarios WHERE id = $1', [payload.id]);
-    if (!rows.length || rows[0].ativo === false) {
+    if (!rows.length || rows[0].ativo !== true) {
       return res.status(403).json({ erro: 'Conta desativada. Entre em contato com o suporte.' });
     }
     req.usuario = { ...payload };
