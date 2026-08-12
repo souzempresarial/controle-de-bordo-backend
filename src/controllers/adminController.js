@@ -62,7 +62,8 @@ async function ranking(req, res) {
 
     res.json(resultado);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[admin.ranking]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

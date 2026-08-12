@@ -1,4 +1,4 @@
-﻿const pool = require('../models/db');
+const pool = require('../models/db');
 
 // Listar lançamentos de um cliente
 async function listar(req, res) {
@@ -10,7 +10,8 @@ async function listar(req, res) {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[lancamentos.listar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -28,7 +29,8 @@ async function criar(req, res) {
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[lancamentos.criar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -47,7 +49,8 @@ async function editar(req, res) {
     if (!result.rows.length) return res.status(404).json({ erro: 'Lançamento não encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[lancamentos.editar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -55,10 +58,12 @@ async function editar(req, res) {
 async function excluir(req, res) {
   try {
     const { clienteId, id } = req.params;
-    await pool.query('DELETE FROM lancamentos WHERE id = $1 AND cliente_id = $2', [id, clienteId]);
+    const result = await pool.query('DELETE FROM lancamentos WHERE id = $1 AND cliente_id = $2', [id, clienteId]);
+    if (!result.rowCount) return res.status(404).json({ erro: 'Lançamento não encontrado' });
     res.json({ mensagem: 'Lançamento excluído com sucesso' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[lancamentos.excluir]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -69,7 +74,8 @@ async function limpar(req, res) {
     await pool.query('DELETE FROM lancamentos WHERE cliente_id = $1', [clienteId]);
     res.json({ mensagem: 'Lançamentos apagados com sucesso' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[lancamentos.limpar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 

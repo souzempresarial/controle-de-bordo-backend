@@ -11,7 +11,7 @@ async function listar(req, res) {
     const result = await pool.query('SELECT * FROM clientes WHERE id = $1', [req.usuario.clienteId]);
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -27,7 +27,7 @@ async function buscar(req, res) {
     if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -43,7 +43,7 @@ async function criar(req, res) {
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -53,6 +53,7 @@ async function editar(req, res) {
   try {
     const { id } = req.params;
     const { nome, cor, obs } = req.body;
+    if (!nome) return res.status(400).json({ erro: 'Nome é obrigatório' });
     const result = await pool.query(
       'UPDATE clientes SET nome=$1, cor=$2, obs=$3 WHERE id=$4 RETURNING *',
       [nome, cor || null, obs || null, id]
@@ -60,7 +61,8 @@ async function editar(req, res) {
     if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    console.error('[clientes.editar]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
@@ -72,7 +74,7 @@ async function excluir(req, res) {
     await pool.query('DELETE FROM clientes WHERE id = $1', [id]);
     res.json({ mensagem: 'Cliente excluído com sucesso' });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
