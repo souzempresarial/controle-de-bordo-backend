@@ -53,14 +53,14 @@ async function login(req, res) {
     const { email, senha, turnstileToken } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Email e senha obrigatórios' });
 
-    if (process.env.TURNSTILE_SECRET_KEY) {
+    if (process.env.TURNSTILE_SECRET_KEY && turnstileToken) {
       const verify = await axios.post(
         'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-        new URLSearchParams({ secret: process.env.TURNSTILE_SECRET_KEY, response: turnstileToken || '', remoteip: req.ip }),
+        new URLSearchParams({ secret: process.env.TURNSTILE_SECRET_KEY, response: turnstileToken, remoteip: req.ip }),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
       );
       if (!verify.data.success) {
-        console.warn('[Turnstile] verificação falhou:', verify.data['error-codes'], 'ip:', req.ip);
+        console.warn('[Turnstile] token inválido:', verify.data['error-codes'], 'ip:', req.ip);
         return res.status(403).json({ erro: 'Verificação de segurança falhou. Recarregue a página e tente novamente.' });
       }
     }
