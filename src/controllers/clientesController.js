@@ -19,6 +19,10 @@ async function listar(req, res) {
 async function buscar(req, res) {
   try {
     const { id } = req.params;
+    const papel = req.usuario.papel;
+    if (papel !== 'admin' && req.usuario.clienteId !== parseInt(id)) {
+      return res.status(403).json({ erro: 'Acesso negado' });
+    }
     const result = await pool.query('SELECT * FROM clientes WHERE id = $1', [id]);
     if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
     res.json(result.rows[0]);
@@ -27,8 +31,9 @@ async function buscar(req, res) {
   }
 }
 
-// Criar cliente
+// Criar cliente — somente admin
 async function criar(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { nome, cor, obs } = req.body;
     if (!nome) return res.status(400).json({ erro: 'Nome é obrigatório' });
@@ -42,8 +47,9 @@ async function criar(req, res) {
   }
 }
 
-// Editar cliente
+// Editar cliente — somente admin
 async function editar(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { id } = req.params;
     const { nome, cor, obs } = req.body;
@@ -58,8 +64,9 @@ async function editar(req, res) {
   }
 }
 
-// Excluir cliente
+// Excluir cliente — somente admin
 async function excluir(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM clientes WHERE id = $1', [id]);

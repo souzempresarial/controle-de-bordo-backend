@@ -27,6 +27,7 @@ router.delete('/usuarios/:id',        autenticar, controller.excluirUsuario);
 router.put('/usuarios/:id/senha',     autenticar, controller.redefinirSenha);
 router.patch('/usuarios/:id/ativo',   autenticar, controller.toggleAtivo);
 router.put('/usuarios/:id/plano',     autenticar, controller.atualizarPlano);
-router.put('/usuarios/:id/email',     autenticar, controller.atualizarEmail);
+router.put('/usuarios/:id/email',        autenticar, controller.atualizarEmail);
+router.patch('/usuarios/:id/permissoes', autenticar, controller.atualizarPermissoes);
 
 module.exports = router;

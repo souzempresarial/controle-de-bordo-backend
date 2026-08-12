@@ -32,12 +32,13 @@ async function criar(req, res) {
 
 async function editar(req, res) {
   try {
-    const { id } = req.params;
+    const { clienteId, id } = req.params;
     const { tipo, descricao, valor, vencimento, categoria, subcategoria, status, recorrente, periodicidade, valor_juros } = req.body;
     const result = await pool.query(
       `UPDATE contas SET tipo=$1, descricao=$2, valor=$3, vencimento=$4, categoria=$5,
-       subcategoria=$6, status=$7, recorrente=$8, periodicidade=$9, valor_juros=$10 WHERE id=$11 RETURNING *`,
-      [tipo, descricao||null, valor, vencimento||null, categoria||null, subcategoria||null, status, recorrente||false, periodicidade||null, valor_juros||null, id]
+       subcategoria=$6, status=$7, recorrente=$8, periodicidade=$9, valor_juros=$10
+       WHERE id=$11 AND cliente_id=$12 RETURNING *`,
+      [tipo, descricao||null, valor, vencimento||null, categoria||null, subcategoria||null, status, recorrente||false, periodicidade||null, valor_juros||null, id, clienteId]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Conta não encontrada' });
     res.json(result.rows[0]);
@@ -48,8 +49,8 @@ async function editar(req, res) {
 
 async function excluir(req, res) {
   try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM contas WHERE id = $1', [id]);
+    const { clienteId, id } = req.params;
+    await pool.query('DELETE FROM contas WHERE id = $1 AND cliente_id = $2', [id, clienteId]);
     res.json({ mensagem: 'Conta excluída com sucesso' });
   } catch (err) {
     res.status(500).json({ erro: err.message });

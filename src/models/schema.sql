@@ -133,3 +133,20 @@ CREATE TABLE IF NOT EXISTS aparelhos_upgrade (
   imei             VARCHAR(20)
 );
 ALTER TABLE aparelhos_upgrade ADD COLUMN IF NOT EXISTS imei VARCHAR(20);
+
+-- Migração: permissões de funcionário
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes JSONB DEFAULT NULL;
+
+-- Migração: rastreamento de acesso
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultimo_acesso TIMESTAMP;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultimo_ip    VARCHAR(50);
+
+-- LOG DE ACESSOS
+CREATE TABLE IF NOT EXISTS log_acessos (
+  id          SERIAL PRIMARY KEY,
+  usuario_id  INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  email       VARCHAR(255),
+  nome        VARCHAR(100),
+  ip          VARCHAR(50),
+  data_hora   TIMESTAMP DEFAULT NOW()
+);

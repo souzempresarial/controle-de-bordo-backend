@@ -1,8 +1,11 @@
-const express    = require('express');
-const router     = express.Router({ mergeParams: true });
-const controller = require('../controllers/saldoController');
+const express            = require('express');
+const router             = express.Router({ mergeParams: true });
+const controller         = require('../controllers/saldoController');
+const verificarPermissao = require('../middleware/verificarPermissao');
 
-router.get('/',  controller.buscar);
-router.post('/', controller.salvar);
+const podeSaldo = verificarPermissao('financeiro');
+
+router.get('/',  podeSaldo, controller.buscar);
+router.post('/', podeSaldo, controller.salvar);
 
 module.exports = router;

@@ -35,13 +35,14 @@ async function criar(req, res) {
 // Editar lançamento
 async function editar(req, res) {
   try {
-    const { id } = req.params;
+    const { clienteId, id } = req.params;
     const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, valor_recebido, grupo_id, valor_upgrade, qtd_upgrade } = req.body;
     const result = await pool.query(
       `UPDATE lancamentos SET tipo=$1, valor=$2, data=$3, categoria=$4, subcategoria=$5,
        descricao=$6, pagamento=$7, status=$8, quantidade=$9, obs=$10,
-       valor_recebido=$11, grupo_id=$12, valor_upgrade=$13, qtd_upgrade=$14 WHERE id=$15 RETURNING *`,
-      [tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status, quantidade||null, obs||null, valor_recebido||null, grupo_id||null, valor_upgrade||null, qtd_upgrade||null, id]
+       valor_recebido=$11, grupo_id=$12, valor_upgrade=$13, qtd_upgrade=$14
+       WHERE id=$15 AND cliente_id=$16 RETURNING *`,
+      [tipo, valor, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status, quantidade||null, obs||null, valor_recebido||null, grupo_id||null, valor_upgrade||null, qtd_upgrade||null, id, clienteId]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Lançamento não encontrado' });
     res.json(result.rows[0]);
@@ -53,8 +54,8 @@ async function editar(req, res) {
 // Excluir lançamento
 async function excluir(req, res) {
   try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM lancamentos WHERE id = $1', [id]);
+    const { clienteId, id } = req.params;
+    await pool.query('DELETE FROM lancamentos WHERE id = $1 AND cliente_id = $2', [id, clienteId]);
     res.json({ mensagem: 'Lançamento excluído com sucesso' });
   } catch (err) {
     res.status(500).json({ erro: err.message });

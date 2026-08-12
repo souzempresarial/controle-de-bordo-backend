@@ -21,6 +21,7 @@ provider:
     NODE_OPTIONS: '--import @sentry/aws-serverless/awslambda-auto'
     BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL: ${env:BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL}
     BRAVE_ENDPOINT_KEY: ${env:BRAVE_ENDPOINT_KEY}
+    TURNSTILE_SECRET_KEY: ${env:TURNSTILE_SECRET_KEY}
 
 functions:
   api:
