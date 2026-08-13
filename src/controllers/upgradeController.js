@@ -78,44 +78,54 @@ async function excluir(req, res) {
 }
 
 async function vender(req, res) {
-  try {
-    const { clienteId, aparelhoId } = req.params;
-    const { valor_venda, data, pagamento, valor_recebido } = req.body;
-    if (!valor_venda || parseFloat(valor_venda) <= 0) return res.status(400).json({ erro: 'Valor de venda obrigatório' });
+  const { clienteId, aparelhoId } = req.params;
+  const { valor_venda, data, pagamento, valor_recebido } = req.body;
+  if (!valor_venda || parseFloat(valor_venda) <= 0) return res.status(400).json({ erro: 'Valor de venda obrigatório' });
 
-    const { rows } = await pool.query('SELECT * FROM aparelhos_upgrade WHERE id=$1 AND cliente_id=$2', [aparelhoId, clienteId]);
-    if (!rows.length) return res.status(404).json({ erro: 'Aparelho não encontrado' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      'SELECT * FROM aparelhos_upgrade WHERE id=$1 AND cliente_id=$2 FOR UPDATE',
+      [aparelhoId, clienteId]
+    );
+    if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ erro: 'Aparelho não encontrado' }); }
     const ap = rows[0];
-    if (ap.status === 'vendido') return res.status(400).json({ erro: 'Aparelho já vendido' });
+    if (ap.status === 'vendido') { await client.query('ROLLBACK'); return res.status(400).json({ erro: 'Aparelho já vendido' }); }
 
     const dataVenda = data || new Date().toISOString().slice(0, 10);
     const descricao = [ap.modelo, ap.armazenamento, ap.cor].filter(Boolean).join(' ');
     const grupoId   = 'upg' + Date.now();
     const recebido  = valor_recebido != null && parseFloat(valor_recebido) > 0 ? parseFloat(valor_recebido) : null;
 
-    await pool.query(
+    await client.query(
       `INSERT INTO lancamentos (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, grupo_id, is_cmv, valor_recebido)
-       VALUES ($1,'Entrada',$2,$3,'Receita de Vendas','Upgrade',$4,$5,'Confirmado',$6,false,$7)`,
+       VALUES ($1,'Entrada',$2,$3,'Aparelhos','Upgrade',$4,$5,'Confirmado',$6,false,$7)`,
       [clienteId, parseFloat(valor_venda), dataVenda, descricao, pagamento||null, grupoId, recebido]
     );
 
     if (ap.valor_avaliado && parseFloat(ap.valor_avaliado) > 0) {
-      await pool.query(
+      await client.query(
         `INSERT INTO lancamentos (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, grupo_id, is_cmv)
          VALUES ($1,'Saída',$2,$3,'Custos Variáveis Diretos','Upgrade',$4,$5,'Confirmado',$6,true)`,
         [clienteId, parseFloat(ap.valor_avaliado), dataVenda, 'CMV — ' + descricao, pagamento||null, grupoId]
       );
     }
 
-    const { rows: updated } = await pool.query(
+    const { rows: updated } = await client.query(
       `UPDATE aparelhos_upgrade SET status='vendido', vendido_em=NOW() WHERE id=$1 AND cliente_id=$2 RETURNING *`,
       [aparelhoId, clienteId]
     );
 
+    await client.query('COMMIT');
     res.json({ ...updated[0], statusAuto: 'VENDIDO' });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('[upgrade.vender]', err.message);
     res.status(500).json({ erro: 'Erro interno' });
+  } finally {
+    client.release();
   }
 }
 

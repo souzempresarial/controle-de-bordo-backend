@@ -232,17 +232,18 @@ async function reenviarVerificacao(req, res) {
 
 async function registrarAdmin(req, res) {
   try {
-    const existe = await pool.query("SELECT id FROM usuarios WHERE papel = 'admin' LIMIT 1");
-    if (existe.rows.length) return res.status(403).json({ erro: 'Admin já existe' });
-
     const { email, senha, nome } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Email e senha obrigatórios' });
 
     const hash = await bcrypt.hash(senha, 10);
     const result = await pool.query(
-      'INSERT INTO usuarios (email, senha_hash, papel, nome, email_verificado) VALUES ($1,$2,$3,$4,true) RETURNING id, email, papel',
-      [email.toLowerCase(), hash, 'admin', nome || 'Admin']
+      `INSERT INTO usuarios (email, senha_hash, papel, nome, email_verificado)
+       SELECT $1, $2, 'admin', $3, true
+       WHERE NOT EXISTS (SELECT 1 FROM usuarios WHERE papel = 'admin')
+       RETURNING id, email, papel`,
+      [email.toLowerCase(), hash, nome || 'Admin']
     );
+    if (!result.rows.length) return res.status(403).json({ erro: 'Admin já existe' });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ erro: 'Email já cadastrado' });
