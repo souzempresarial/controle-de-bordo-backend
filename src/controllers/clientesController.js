@@ -71,9 +71,12 @@ async function excluir(req, res) {
   if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { id } = req.params;
-    await pool.query('DELETE FROM clientes WHERE id = $1', [id]);
+    const result = await pool.query('DELETE FROM clientes WHERE id = $1 RETURNING id', [id]);
+    if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
     res.json({ mensagem: 'Cliente excluído com sucesso' });
   } catch (err) {
+    if (err.code === '23503') return res.status(409).json({ erro: 'Cliente possui dados vinculados e não pode ser excluído' });
+    console.error('[clientes.excluir]', err.message);
     res.status(500).json({ erro: 'Erro interno' });
   }
 }
