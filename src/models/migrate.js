@@ -10,6 +10,7 @@ async function migrate() {
     console.log('Tabelas criadas com sucesso!');
   } catch (err) {
     console.error('Erro ao criar tabelas:', err.message);
+    process.exit(1);
   } finally {
     await pool.end();
   }

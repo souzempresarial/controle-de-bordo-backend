@@ -11,8 +11,8 @@ function fmtBRL(v) {
 
 function fmtData(iso) {
   if (!iso) return '';
-  const [y, m, d] = iso.toISOString ? iso.toISOString().slice(0, 10).split('-') : iso.slice(0, 10).split('-');
-  return `${d}/${m}/${y}`;
+  const d = iso instanceof Date ? iso : new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 async function buscarVencimentos() {

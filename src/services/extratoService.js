@@ -148,7 +148,12 @@ function extrairTextoPDF(buffer) {
 
 function parseResposta(texto) {
   const limpo = texto.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  const json = JSON.parse(limpo);
+  let json;
+  try {
+    json = JSON.parse(limpo);
+  } catch {
+    throw new Error('Resposta do Gemini não é um JSON válido');
+  }
   return json.transacoes || [];
 }
 
@@ -164,7 +169,10 @@ async function buscarRegras(clienteId) {
       [clienteId]
     );
     return rows;
-  } catch { return []; }
+  } catch (err) {
+    console.error('[Extrato] Erro ao buscar regras:', err.message);
+    return [];
+  }
 }
 
 function aplicarRegras(transacoes, regras) {
@@ -172,7 +180,7 @@ function aplicarRegras(transacoes, regras) {
   return transacoes.map(t => {
     const descNorm = extrairPalavraChave(t.descricao || '');
     const regra = regras.find(r =>
-      descNorm.includes(r.palavra_chave) || r.palavra_chave.includes(descNorm)
+      descNorm.includes(r.palavra_chave)
     );
     if (regra) return { ...t, categoria_sugerida: regra.categoria, subcategoria_sugerida: regra.subcategoria || null };
     return t;

@@ -6,7 +6,7 @@ module.exports.alertas = async (event) => {
     const resultado = await executarAlertas();
     return { statusCode: 200, body: JSON.stringify(resultado) };
   } catch (err) {
-    console.error('[Alertas] Erro:', err.message);
-    return { statusCode: 500, body: JSON.stringify({ erro: err.message }) };
+    console.error('[Alertas] Erro:', err);
+    return { statusCode: 500, body: JSON.stringify({ erro: 'Erro interno ao executar alertas' }) };
   }
 };
