@@ -315,7 +315,13 @@ async function listarUsuarios(req, res) {
 async function excluirUsuario(req, res) {
   if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
-    await pool.query('DELETE FROM usuarios WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query('DELETE FROM usuarios WHERE id = $1 RETURNING cliente_id', [req.params.id]);
+    if (rows[0]?.cliente_id) {
+      const { rowCount } = await pool.query('SELECT 1 FROM usuarios WHERE cliente_id = $1', [rows[0].cliente_id]);
+      if (rowCount === 0) {
+        await pool.query('DELETE FROM clientes WHERE id = $1', [rows[0].cliente_id]);
+      }
+    }
     res.json({ mensagem: 'Usuário excluído' });
   } catch (err) {
     console.error('[auth]', err.message);

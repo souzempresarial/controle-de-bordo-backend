@@ -5,7 +5,8 @@ const verificarPermissao = require('../middleware/verificarPermissao');
 
 const podeContas = verificarPermissao('contas');
 
-router.get('/',           podeContas, controller.listar);
+// GET: leitura liberada para qualquer usuário do cliente (autorizar.js garante ownership)
+router.get('/', controller.listar);
 router.post('/',          podeContas, controller.criar);
 router.delete('/bulk',    podeContas, controller.excluirEmMassa);
 router.put('/:id',        podeContas, controller.editar);

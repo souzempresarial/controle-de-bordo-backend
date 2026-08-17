@@ -21,7 +21,7 @@ async function criar(req, res) {
     const { clienteId } = req.params;
     const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade } = req.body;
     const valorNum = parseFloat(valor);
-    if (!tipo || !data || isNaN(valorNum) || valorNum <= 0) return res.status(400).json({ erro: 'Tipo, valor (positivo) e data são obrigatórios' });
+    if (!tipo || !data || isNaN(valorNum) || valorNum < 0) return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
     const result = await pool.query(
       `INSERT INTO lancamentos
         (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade)
@@ -41,8 +41,8 @@ async function editar(req, res) {
     const { clienteId, id } = req.params;
     const { tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, valor_recebido, grupo_id, valor_upgrade, qtd_upgrade } = req.body;
     const valorNum = parseFloat(valor);
-    if (!tipo || !data || isNaN(valorNum) || valorNum <= 0) {
-      return res.status(400).json({ erro: 'Tipo, valor (positivo) e data são obrigatórios' });
+    if (!tipo || !data || isNaN(valorNum) || valorNum < 0) {
+      return res.status(400).json({ erro: 'Tipo, valor e data são obrigatórios' });
     }
     const statusValido = ['Confirmado', 'Pendente', 'Cancelado'].includes(status) ? status : 'Confirmado';
     const result = await pool.query(
