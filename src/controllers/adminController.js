@@ -26,13 +26,22 @@ async function ranking(req, res) {
         -- DRE (base competência): usa l.valor original
         COALESCE(SUM(CASE WHEN l.tipo = 'Entrada' AND l.categoria NOT IN (${sqlIn(APORTE_CATS)}) THEN l.valor ELSE 0 END), 0) AS receita_bruta,
         COALESCE(SUM(CASE WHEN l.tipo = 'Saída'   AND (COALESCE(l.is_cmv, false) OR l.categoria IN (${sqlIn(CMVCATS)}))   THEN l.valor ELSE 0 END), 0) AS cmv,
-        COALESCE(SUM(CASE WHEN l.tipo = 'Saída'   AND l.categoria IN (${sqlIn(DEDUCOES_CATS)}) THEN l.valor ELSE 0 END), 0) AS deducoes,
+        COALESCE(SUM(CASE WHEN l.tipo = 'Saída'   AND l.categoria IN (${sqlIn(DEDUCOES_CATS)}) THEN l.valor ELSE 0 END), 0)
+        + COALESCE(SUM(CASE WHEN l.tipo = 'Entrada' AND l.valor_recebido IS NOT NULL THEN l.valor - l.valor_recebido ELSE 0 END), 0) AS deducoes,
         COALESCE(SUM(CASE WHEN l.tipo = 'Saída'   AND l.categoria IN (${sqlIn(SGA_CATS)})      THEN l.valor ELSE 0 END), 0) AS sga,
         COALESCE(SUM(CASE WHEN l.tipo = 'Saída'   AND l.categoria IN (${sqlIn(NAOOP_CATS)})    THEN l.valor ELSE 0 END), 0) AS nao_op,
 
-        -- DFC (base caixa): entradas usam valor_recebido, saídas usam valor cheio
-        COALESCE(SUM(CASE WHEN l.tipo = 'Entrada' AND l.categoria NOT IN (${sqlIn(APORTE_CATS)}) THEN COALESCE(l.valor_recebido, l.valor) ELSE 0 END), 0) AS dfc_entradas,
-        COALESCE(SUM(CASE WHEN l.tipo = 'Saída'   AND l.categoria NOT IN (${sqlIn(APORTE_CATS)}) THEN l.valor ELSE 0 END), 0) AS dfc_saidas
+        -- DFC (base caixa): espelha Financeiro.jsx — exclui CMV, deduz valor_upgrade das entradas
+        COALESCE(SUM(CASE
+          WHEN l.tipo = 'Entrada' AND NOT COALESCE(l.is_cmv, false) AND l.categoria NOT IN (${sqlIn(CMVCATS)})
+          THEN l.valor - COALESCE(l.valor_upgrade, 0)
+          ELSE 0
+        END), 0) AS dfc_entradas,
+        COALESCE(SUM(CASE
+          WHEN l.tipo = 'Saída' AND NOT COALESCE(l.is_cmv, false) AND l.categoria NOT IN (${sqlIn(CMVCATS)})
+          THEN l.valor
+          ELSE 0
+        END), 0) AS dfc_saidas
 
       FROM clientes c
       LEFT JOIN lancamentos l ON l.cliente_id = c.id AND l.status = 'Confirmado' ${filtroMes}
