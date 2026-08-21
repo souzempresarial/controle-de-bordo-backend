@@ -144,6 +144,9 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Migração: banco de origem do lançamento
+ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS banco VARCHAR(50);
+
 -- Migração: permissões de funcionário
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes JSONB DEFAULT NULL;
 

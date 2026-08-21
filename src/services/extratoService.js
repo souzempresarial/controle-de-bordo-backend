@@ -254,7 +254,20 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('Resposta vazia do Gemini');
 
-    const transacoes = parseResposta(text);
+    let transacoes = parseResposta(text);
+
+    // Garante filtro de período mesmo se o Gemini incluiu datas fora do range
+    if (dataInicio || dataFim) {
+      const ini = dataInicio ? dataInicio : null;
+      const fim = dataFim    ? dataFim    : null;
+      transacoes = transacoes.filter(t => {
+        if (!t.data) return true;
+        if (ini && t.data < ini) return false;
+        if (fim && t.data > fim) return false;
+        return true;
+      });
+    }
+
     const regras = await buscarRegras(clienteId);
     return aplicarRegras(transacoes, regras);
   }
