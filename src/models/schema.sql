@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   obs       TEXT,
   criado_em TIMESTAMP DEFAULT NOW()
 );
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS mercadophone_api_key TEXT;
 
 -- LANÇAMENTOS
 CREATE TABLE IF NOT EXISTS lancamentos (

@@ -1,0 +1,181 @@
+const pool = require('../models/db');
+
+const MP_BASE = 'https://platform.mercadophone.tech/api/v1';
+
+async function getApiKey(clienteId) {
+  const { rows } = await pool.query('SELECT mercadophone_api_key FROM clientes WHERE id = $1', [clienteId]);
+  return rows[0]?.mercadophone_api_key || null;
+}
+
+function mapPagamento(canal) {
+  if (!canal) return '';
+  const c = canal.toLowerCase();
+  if (c.includes('pix'))                              return 'Pix';
+  if (c.includes('crédito') || c.includes('credito')) return 'Crédito';
+  if (c.includes('débito')  || c.includes('debito'))  return 'Débito';
+  if (c.includes('dinheiro') || c.includes('espécie') || c.includes('especie')) return 'Dinheiro';
+  if (c.includes('boleto'))                           return 'Boleto';
+  if (c.includes('transferência') || c.includes('ted') || c.includes('doc'))    return 'Transferência';
+  return canal;
+}
+
+function mapCategoria(tipoProduto, tipoVenda, aparelho) {
+  const tv = (tipoVenda   || '').toLowerCase();
+  const ap = (aparelho    || '').toLowerCase();
+  const tp = (tipoProduto || '').toLowerCase();
+
+  if (tv.includes('assist') || tv.includes('serviço') || tp.includes('serviço') || tp.includes('reparo'))
+    return { categoria: 'Assistência Técnica', subcategoria: 'Outro' };
+
+  if (ap.includes('iphone') || tp.includes('iphone'))        return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  if (ap.includes('airpods'))                                 return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
+  if (ap.includes('apple watch') || ap.includes('watch'))    return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
+  if (ap.includes('ipad'))                                    return { categoria: 'Aparelhos', subcategoria: 'iPad' };
+  if (ap.includes('macbook') || ap.includes('mac'))          return { categoria: 'Aparelhos', subcategoria: 'Mac' };
+  if (ap.includes('upgrade'))                                 return { categoria: 'Aparelhos', subcategoria: 'Upgrade' };
+  if (ap.includes('android') || ap.includes('samsung') || ap.includes('motorola') || ap.includes('xiaomi'))
+    return { categoria: 'Aparelhos', subcategoria: 'Android' };
+
+  return { categoria: 'Aparelhos', subcategoria: 'Outro' };
+}
+
+function mapCmvSub(subcategoria) {
+  const s = (subcategoria || '').toLowerCase();
+  if (s.includes('iphone'))       return 'Aparelhos iPhone';
+  if (s.includes('android'))      return 'Aparelhos Android';
+  if (s.includes('airpods'))      return 'AirPods';
+  if (s.includes('apple watch') || s.includes('watch')) return 'Apple Watch';
+  if (s.includes('ipad'))         return 'iPad';
+  if (s.includes('mac'))          return 'MacBook';
+  if (s.includes('upgrade'))      return 'Upgrade';
+  return 'Outros';
+}
+
+async function status(req, res) {
+  try {
+    const apiKey = await getApiKey(req.params.clienteId);
+    res.json({ configurado: !!apiKey });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
+async function salvarChave(req, res) {
+  try {
+    const { clienteId } = req.params;
+    const { apiKey } = req.body;
+    if (!apiKey) return res.status(400).json({ erro: 'Chave obrigatória' });
+    await pool.query('UPDATE clientes SET mercadophone_api_key = $1 WHERE id = $2', [apiKey, clienteId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[MP salvarChave]', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+async function preview(req, res) {
+  try {
+    const { clienteId } = req.params;
+    const { dataInicio, dataFim } = req.body;
+
+    const apiKey = await getApiKey(clienteId);
+    if (!apiKey) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
+
+    const params = new URLSearchParams({ limit: 300, direction: 'desc' });
+    if (dataInicio) params.append('dataVendaInicial', dataInicio);
+    if (dataFim)    params.append('dataVendaFinal',   dataFim);
+
+    const mpResp = await fetch(`${MP_BASE}/sales/history?${params}`, {
+      headers: { 'X-API-Key': apiKey },
+    });
+    if (!mpResp.ok) {
+      const err = await mpResp.json().catch(() => ({}));
+      throw new Error(err.detail || err.message || `Erro ${mpResp.status} no Mercado Phone`);
+    }
+    const { items = [] } = await mpResp.json();
+
+    // IDs já importados
+    const { rows: existentes } = await pool.query(
+      `SELECT obs FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[MP-%'`,
+      [clienteId]
+    );
+    const idsImportados = new Set(
+      existentes.map(r => r.obs?.match(/\[MP-(\d+)\]/)?.[1]).filter(Boolean)
+    );
+
+    const transacoes = items.map(item => {
+      const { categoria, subcategoria } = mapCategoria(
+        item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao
+      );
+      return {
+        mpVendaId:      item.vendaId,
+        data:           (item.dataVenda || '').slice(0, 10),
+        valor:          parseFloat(item.valorCliente || item.valorTotal || 0),
+        cmvValor:       parseFloat(item.valorCusto || 0),
+        quantidade:     item.quantidade || null,
+        categoria,
+        subcategoria,
+        descricao:      item.aparelhoDescricao || item.tipoProdutoDescricao || '',
+        pagamento:      mapPagamento(item.canalVendaDescricao),
+        status:         (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
+        vendedorNome:   item.vendedorNome   || '',
+        clienteNome:    item.clienteNome    || '',
+        canalOriginal:  item.canalVendaDescricao  || '',
+        tipoOriginal:   item.tipoProdutoDescricao || '',
+        jaImportado:    idsImportados.has(String(item.vendaId)),
+      };
+    });
+
+    res.json({ transacoes });
+  } catch (err) {
+    console.error('[MP preview]', err.message);
+    res.status(500).json({ erro: err.message || 'Erro interno' });
+  }
+}
+
+async function importar(req, res) {
+  try {
+    const { clienteId } = req.params;
+    const { transacoes } = req.body;
+
+    if (!transacoes?.length) return res.json({ importados: 0 });
+
+    let importados = 0;
+    for (const t of transacoes) {
+      if (t.jaImportado) continue;
+
+      const grupoId = t.cmvValor > 0 ? `g${Date.now()}${t.mpVendaId}` : null;
+      const obs     = `[MP-${t.mpVendaId}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
+
+      await pool.query(
+        `INSERT INTO lancamentos
+          (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, grupo_id, is_cmv)
+         VALUES ($1,'Entrada',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false)`,
+        [clienteId, t.valor, t.data, t.categoria, t.subcategoria || null,
+         t.descricao || null, t.pagamento || null, t.status || 'Confirmado',
+         t.quantidade ?? null, obs, grupoId]
+      );
+
+      if (t.cmvValor > 0) {
+        await pool.query(
+          `INSERT INTO lancamentos
+            (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, obs, grupo_id, is_cmv)
+           VALUES ($1,'Saída',$2,$3,'Custos Variáveis Diretos',$4,$5,$6,$7,$8,$9,true)`,
+          [clienteId, t.cmvValor, t.data, mapCmvSub(t.subcategoria),
+           'CMV — ' + (t.descricao || ''), t.pagamento || null,
+           t.status || 'Confirmado',
+           `CMV vinculado ao MP-${t.mpVendaId}`, grupoId]
+        );
+      }
+
+      importados++;
+    }
+
+    res.json({ importados });
+  } catch (err) {
+    console.error('[MP importar]', err.message);
+    res.status(500).json({ erro: err.message || 'Erro interno' });
+  }
+}
+
+module.exports = { status, salvarChave, preview, importar };
