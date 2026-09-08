@@ -26,7 +26,7 @@ async function criar(req, res) {
       `INSERT INTO lancamentos
         (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, is_cmv, grupo_id, valor_recebido, origem, obs, valor_upgrade, qtd_upgrade, banco)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-      [clienteId, tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade||null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null, valor_upgrade||null, qtd_upgrade||null, banco||null]
+      [clienteId, tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade??null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null, valor_upgrade||null, qtd_upgrade||null, banco||null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -50,7 +50,7 @@ async function editar(req, res) {
        descricao=$6, pagamento=$7, status=$8, quantidade=$9, obs=$10,
        valor_recebido=$11, grupo_id=$12, valor_upgrade=$13, qtd_upgrade=$14, banco=$15
        WHERE id=$16 AND cliente_id=$17 RETURNING *`,
-      [tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, statusValido, quantidade||null, obs||null, valor_recebido||null, grupo_id||null, valor_upgrade||null, qtd_upgrade||null, banco||null, id, clienteId]
+      [tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, statusValido, quantidade??null, obs||null, valor_recebido||null, grupo_id||null, valor_upgrade||null, qtd_upgrade||null, banco||null, id, clienteId]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Lançamento não encontrado' });
     res.json(result.rows[0]);
