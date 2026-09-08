@@ -22,7 +22,7 @@ function extrairPalavraChave(descricao) {
   return d;
 }
 
-const GEMINI_MODEL = 'gemini-flash-latest';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const PROMPT_SISTEMA = `Analise o extrato bancário e extraia apenas as SAÍDAS (débitos, pagamentos, transferências enviadas).
 
