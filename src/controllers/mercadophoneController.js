@@ -16,38 +16,59 @@ function mapPagamento(canal) {
   if (c.includes('dinheiro') || c.includes('espécie') || c.includes('especie')) return 'Dinheiro';
   if (c.includes('boleto'))                           return 'Boleto';
   if (c.includes('transferência') || c.includes('ted') || c.includes('doc'))    return 'Transferência';
-  return canal;
+  // canal pode ser "Aparelho", "Upgrade" etc — nesses casos retorna vazio para usuário definir
+  return '';
 }
 
-function mapCategoria(tipoProduto, tipoVenda, aparelho) {
-  const tv = (tipoVenda   || '').toLowerCase();
-  const ap = (aparelho    || '').toLowerCase();
-  const tp = (tipoProduto || '').toLowerCase();
+function mapAcessorioSub(str) {
+  if (str.includes('cabo') || str.includes('carregador') || str.includes('fonte')) return 'Cabo / Carregador';
+  if (str.includes('pelicula') || str.includes('película') || str.includes('capa') || str.includes('case')) return 'Capa e Película';
+  return 'Acessórios Geral';
+}
 
+function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda) {
+  const tv  = (tipoVenda  || '').toLowerCase();
+  const ap  = (aparelho   || '').toLowerCase();
+  const tp  = (tipoProduto|| '').toLowerCase();
+  const cv  = (canalVenda || '').toLowerCase();
+  const str = ap || tp;
+
+  // Assistência técnica
   if (tv.includes('assist') || tv.includes('serviço') || tp.includes('serviço') || tp.includes('reparo'))
     return { categoria: 'Assistência Técnica', subcategoria: 'Outro' };
 
-  if (ap.includes('iphone') || tp.includes('iphone'))        return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
-  if (ap.includes('airpods'))                                 return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
-  if (ap.includes('apple watch') || ap.includes('watch'))    return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
-  if (ap.includes('ipad'))                                    return { categoria: 'Aparelhos', subcategoria: 'iPad' };
-  if (ap.includes('macbook') || ap.includes('mac'))          return { categoria: 'Aparelhos', subcategoria: 'Mac' };
-  if (ap.includes('upgrade'))                                 return { categoria: 'Aparelhos', subcategoria: 'Upgrade' };
-  if (ap.includes('android') || ap.includes('samsung') || ap.includes('motorola') || ap.includes('xiaomi'))
+  // Upgrade — detecta pelo canal de venda, tipo de venda ou descrição
+  if (cv.includes('upgrade') || tv.includes('upgrade') || str.includes('upgrade'))
+    return { categoria: 'Aparelhos', subcategoria: 'Upgrade' };
+
+  // Acessórios — detecta pela descrição do produto
+  const acessorioKw = ['cabo', 'pelicula', 'película', 'capa', 'case', 'capinha', 'carregador', 'película 3d'];
+  if (acessorioKw.some(k => str.includes(k)))
+    return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str) };
+
+  // Aparelhos por descrição
+  if (str.includes('iphone'))                                            return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  if (str.includes('airpods'))                                           return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
+  if (str.includes('apple watch') || str.includes('watch'))              return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
+  if (str.includes('ipad'))                                              return { categoria: 'Aparelhos', subcategoria: 'iPad' };
+  if (str.includes('macbook') || str.includes('mac'))                    return { categoria: 'Aparelhos', subcategoria: 'Mac' };
+  if (str.includes('android') || str.includes('samsung') || str.includes('motorola') || str.includes('xiaomi'))
     return { categoria: 'Aparelhos', subcategoria: 'Android' };
 
   return { categoria: 'Aparelhos', subcategoria: 'Outro' };
 }
 
-function mapCmvSub(subcategoria) {
+function mapCmvSub(subcategoria, categoria) {
+  if ((categoria || '').toLowerCase().includes('acess'))   return 'Acessórios';
+  if ((categoria || '').toLowerCase().includes('assist'))  return 'Assistência Técnica';
   const s = (subcategoria || '').toLowerCase();
-  if (s.includes('iphone'))       return 'Aparelhos iPhone';
-  if (s.includes('android'))      return 'Aparelhos Android';
-  if (s.includes('airpods'))      return 'AirPods';
-  if (s.includes('apple watch') || s.includes('watch')) return 'Apple Watch';
-  if (s.includes('ipad'))         return 'iPad';
-  if (s.includes('mac'))          return 'MacBook';
-  if (s.includes('upgrade'))      return 'Upgrade';
+  if (s.includes('iphone'))                                return 'Aparelhos iPhone';
+  if (s.includes('android'))                               return 'Aparelhos Android';
+  if (s.includes('airpods'))                               return 'AirPods';
+  if (s.includes('apple watch') || s.includes('watch'))   return 'Apple Watch';
+  if (s.includes('ipad'))                                  return 'iPad';
+  if (s.includes('mac'))                                   return 'MacBook';
+  if (s.includes('upgrade'))                               return 'Upgrade';
   return 'Outros';
 }
 
@@ -105,7 +126,7 @@ async function preview(req, res) {
 
     const transacoes = items.map(item => {
       const { categoria, subcategoria } = mapCategoria(
-        item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao
+        item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao, item.canalVendaDescricao
       );
       return {
         mpVendaId:      item.vendaId,
@@ -161,7 +182,7 @@ async function importar(req, res) {
           `INSERT INTO lancamentos
             (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, obs, grupo_id, is_cmv)
            VALUES ($1,'Saída',$2,$3,'Custos Variáveis Diretos',$4,$5,$6,$7,$8,$9,true)`,
-          [clienteId, t.cmvValor, t.data, mapCmvSub(t.subcategoria),
+          [clienteId, t.cmvValor, t.data, mapCmvSub(t.subcategoria, t.categoria),
            'CMV — ' + (t.descricao || ''), t.pagamento || null,
            t.status || 'Confirmado',
            `CMV vinculado ao MP-${t.mpVendaId}`, grupoId]
