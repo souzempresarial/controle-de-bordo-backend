@@ -28,7 +28,21 @@ async function criar(req, res) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
       [clienteId, tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, status||'Confirmado', quantidade??null, is_cmv||false, grupo_id||null, valor_recebido||null, origem||null, obs||null, valor_upgrade||null, qtd_upgrade||null, banco||null]
     );
-    res.status(201).json(result.rows[0]);
+    const lancamento = result.rows[0];
+    const upgradeVal = parseFloat(valor_upgrade || 0);
+    if (tipo === 'Entrada' && upgradeVal > valorNum) {
+      const gid = lancamento.grupo_id || `g${Date.now()}${lancamento.id}`;
+      if (!lancamento.grupo_id) {
+        await pool.query('UPDATE lancamentos SET grupo_id = $1 WHERE id = $2', [gid, lancamento.id]);
+        lancamento.grupo_id = gid;
+      }
+      await pool.query(
+        `INSERT INTO lancamentos (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, grupo_id, is_cmv)
+         VALUES ($1,'Saída',$2,$3,'Downgrade','Downgrade',$4,$5,$6,$7,false)`,
+        [clienteId, upgradeVal - valorNum, data, 'Downgrade — ' + (descricao || ''), pagamento||null, status||'Confirmado', gid]
+      );
+    }
+    res.status(201).json(lancamento);
   } catch (err) {
     console.error('[lancamentos.criar]', err.message);
     res.status(500).json({ erro: 'Erro interno' });
@@ -53,7 +67,41 @@ async function editar(req, res) {
       [tipo, valorNum, data, categoria||null, subcategoria||null, descricao||null, pagamento||null, statusValido, quantidade??null, obs||null, valor_recebido||null, grupo_id||null, valor_upgrade||null, qtd_upgrade||null, banco||null, id, clienteId]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Lançamento não encontrado' });
-    res.json(result.rows[0]);
+    const lancamento = result.rows[0];
+    const upgradeVal = parseFloat(valor_upgrade || 0);
+    const gid = lancamento.grupo_id;
+    if (tipo === 'Entrada') {
+      if (upgradeVal > valorNum) {
+        let grupoAtivo = gid;
+        if (!grupoAtivo) {
+          grupoAtivo = `g${Date.now()}${id}`;
+          await pool.query('UPDATE lancamentos SET grupo_id = $1 WHERE id = $2', [grupoAtivo, id]);
+          lancamento.grupo_id = grupoAtivo;
+        }
+        const { rows: existing } = await pool.query(
+          `SELECT id FROM lancamentos WHERE grupo_id=$1 AND categoria='Downgrade' AND tipo='Saída' AND cliente_id=$2`,
+          [grupoAtivo, clienteId]
+        );
+        if (existing.length) {
+          await pool.query(
+            `UPDATE lancamentos SET valor=$1, data=$2, descricao=$3, pagamento=$4, status=$5 WHERE id=$6`,
+            [upgradeVal - valorNum, data, 'Downgrade — ' + (descricao || ''), pagamento||null, statusValido, existing[0].id]
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO lancamentos (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, grupo_id, is_cmv)
+             VALUES ($1,'Saída',$2,$3,'Downgrade','Downgrade',$4,$5,$6,$7,false)`,
+            [clienteId, upgradeVal - valorNum, data, 'Downgrade — ' + (descricao || ''), pagamento||null, statusValido, grupoAtivo]
+          );
+        }
+      } else if (gid) {
+        await pool.query(
+          `DELETE FROM lancamentos WHERE grupo_id=$1 AND categoria='Downgrade' AND tipo='Saída' AND cliente_id=$2`,
+          [gid, clienteId]
+        );
+      }
+    }
+    res.json(lancamento);
   } catch (err) {
     console.error('[lancamentos.editar]', err.message);
     res.status(500).json({ erro: 'Erro interno' });

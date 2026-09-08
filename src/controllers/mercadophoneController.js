@@ -177,10 +177,11 @@ async function importar(req, res) {
     for (const t of transacoes) {
       if (t.jaImportado) continue;
 
-      const grupoId = t.cmvValor > 0 ? `g${Date.now()}${t.mpVendaId}` : null;
-      const obs     = `[MP-${t.mpVendaId}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
+      const upgradeVal  = t.valorUpgrade && parseFloat(t.valorUpgrade) > 0 ? parseFloat(t.valorUpgrade) : null;
+      const isDowngrade = upgradeVal != null && upgradeVal > t.valor;
+      const grupoId     = (t.cmvValor > 0 || isDowngrade) ? `g${Date.now()}${t.mpVendaId}` : null;
+      const obs         = `[MP-${t.mpVendaId}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
 
-      const upgradeVal = t.valorUpgrade && parseFloat(t.valorUpgrade) > 0 ? parseFloat(t.valorUpgrade) : null;
       await pool.query(
         `INSERT INTO lancamentos
           (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, grupo_id, is_cmv, valor_upgrade)
@@ -199,6 +200,18 @@ async function importar(req, res) {
            'CMV — ' + (t.descricao || ''), t.pagamento || null,
            t.status || 'Confirmado',
            `CMV vinculado ao MP-${t.mpVendaId}`, grupoId]
+        );
+      }
+
+      if (isDowngrade) {
+        await pool.query(
+          `INSERT INTO lancamentos
+            (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, obs, grupo_id, is_cmv)
+           VALUES ($1,'Saída',$2,$3,'Downgrade','Downgrade',$4,$5,$6,$7,$8,false)`,
+          [clienteId, upgradeVal - t.valor, t.data,
+           'Downgrade — ' + (t.descricao || ''), t.pagamento || null,
+           t.status || 'Confirmado',
+           `Downgrade vinculado ao MP-${t.mpVendaId}`, grupoId]
         );
       }
 
