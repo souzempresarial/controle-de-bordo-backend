@@ -128,22 +128,34 @@ async function preview(req, res) {
       const { categoria, subcategoria } = mapCategoria(
         item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao, item.canalVendaDescricao
       );
+      // Tenta vários nomes possíveis para o campo de pagamento do MP
+      const pagamentoRaw =
+        item.formaPagamentoDescricao ||
+        item.meioPagamentoDescricao  ||
+        item.tipoPagamentoDescricao  ||
+        item.formaPagamento          ||
+        item.meioPagamento           ||
+        item.tipoPagamento           ||
+        '';
+
       return {
-        mpVendaId:      item.vendaId,
-        data:           (item.dataVenda || '').slice(0, 10),
-        valor:          parseFloat(item.valorCliente || item.valorTotal || 0),
-        cmvValor:       parseFloat(item.valorCusto || 0),
-        quantidade:     item.quantidade || null,
+        mpVendaId:        item.vendaId,
+        data:             (item.dataVenda || '').slice(0, 10),
+        valor:            parseFloat(item.valorCliente || item.valorTotal || 0),
+        cmvValor:         parseFloat(item.valorCusto || 0),
+        quantidade:       item.quantidade || null,
         categoria,
         subcategoria,
-        descricao:      item.aparelhoDescricao || item.tipoProdutoDescricao || '',
-        pagamento:      mapPagamento(item.canalVendaDescricao),
-        status:         (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
-        vendedorNome:   item.vendedorNome   || '',
-        clienteNome:    item.clienteNome    || '',
-        canalOriginal:  item.canalVendaDescricao  || '',
-        tipoOriginal:   item.tipoProdutoDescricao || '',
-        jaImportado:    idsImportados.has(String(item.vendaId)),
+        descricao:        item.aparelhoDescricao || item.tipoProdutoDescricao || '',
+        pagamento:        mapPagamento(pagamentoRaw),
+        status:           (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
+        vendedorNome:     item.vendedorNome        || '',
+        clienteNome:      item.clienteNome         || '',
+        canalOriginal:    item.canalVendaDescricao || '',
+        pagamentoOriginal: pagamentoRaw,
+        // Expõe todos os campos do item para facilitar debug do mapeamento
+        _camposMp:        Object.keys(item),
+        jaImportado:      idsImportados.has(String(item.vendaId)),
       };
     });
 
