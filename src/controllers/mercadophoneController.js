@@ -53,9 +53,10 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   if (str.includes('apple watch') || str.includes('watch'))                         return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
   if (str.includes('ipad'))                                                          return { categoria: 'Aparelhos', subcategoria: 'iPad' };
   if (str.includes('macbook') || str.includes('mac'))                               return { categoria: 'Aparelhos', subcategoria: 'Mac' };
-  if (str.includes('android') || str.includes('samsung') || str.includes('motorola') || str.includes('xiaomi') || ma.includes('samsung') || ma.includes('motorola'))
+  const androidMarcas = ['samsung', 'motorola', 'xiaomi', 'redmi', 'lg', 'sony', 'asus', 'realme', 'oppo', 'oneplus', 'huawei', 'positivo', 'multilaser'];
+  if (str.includes('android') || androidMarcas.some(m => str.includes(m) || ma.includes(m)))
     return { categoria: 'Aparelhos', subcategoria: 'Android' };
-  if (ma.includes('apple'))  return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  if (ma.includes('apple')) return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
 
   return { categoria: 'Aparelhos', subcategoria: 'Outro' };
 }
