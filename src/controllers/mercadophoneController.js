@@ -1,4 +1,4 @@
-const pool = require('../models/db');
+﻿const pool = require('../models/db');
 
 const MP_BASE = 'https://platform.mercadophone.tech/api/v1';
 
@@ -26,11 +26,12 @@ function mapAcessorioSub(str) {
   return 'Acessórios Geral';
 }
 
-function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda) {
+function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   const tv  = (tipoVenda  || '').toLowerCase();
   const ap  = (aparelho   || '').toLowerCase();
   const tp  = (tipoProduto|| '').toLowerCase();
   const cv  = (canalVenda || '').toLowerCase();
+  const ma  = (marca      || '').toLowerCase();
   const str = ap || tp;
 
   // Assistência técnica
@@ -46,14 +47,15 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda) {
   if (acessorioKw.some(k => str.includes(k)))
     return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str) };
 
-  // Aparelhos por descrição
-  if (str.includes('iphone'))                                            return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
-  if (str.includes('airpods'))                                           return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
-  if (str.includes('apple watch') || str.includes('watch'))              return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
-  if (str.includes('ipad'))                                              return { categoria: 'Aparelhos', subcategoria: 'iPad' };
-  if (str.includes('macbook') || str.includes('mac'))                    return { categoria: 'Aparelhos', subcategoria: 'Mac' };
-  if (str.includes('android') || str.includes('samsung') || str.includes('motorola') || str.includes('xiaomi'))
+  // Aparelhos — usa marca (marcaDescricao) como sinal adicional
+  if (str.includes('iphone') || (ma.includes('apple') && str.includes('iphone'))) return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  if (str.includes('airpods'))                                                      return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
+  if (str.includes('apple watch') || str.includes('watch'))                         return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
+  if (str.includes('ipad'))                                                          return { categoria: 'Aparelhos', subcategoria: 'iPad' };
+  if (str.includes('macbook') || str.includes('mac'))                               return { categoria: 'Aparelhos', subcategoria: 'Mac' };
+  if (str.includes('android') || str.includes('samsung') || str.includes('motorola') || str.includes('xiaomi') || ma.includes('samsung') || ma.includes('motorola'))
     return { categoria: 'Aparelhos', subcategoria: 'Android' };
+  if (ma.includes('apple'))  return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
 
   return { categoria: 'Aparelhos', subcategoria: 'Outro' };
 }
@@ -126,36 +128,33 @@ async function preview(req, res) {
 
     const transacoes = items.map(item => {
       const { categoria, subcategoria } = mapCategoria(
-        item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao, item.canalVendaDescricao
+        item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao,
+        item.canalVendaDescricao, item.marcaDescricao
       );
-      // Tenta vários nomes possíveis para o campo de pagamento do MP
-      const pagamentoRaw =
-        item.formaPagamentoDescricao ||
-        item.meioPagamentoDescricao  ||
-        item.tipoPagamentoDescricao  ||
-        item.formaPagamento          ||
-        item.meioPagamento           ||
-        item.tipoPagamento           ||
-        '';
+
+      const isUpgradeAuto = (item.tipoVendaDescricao || '').toLowerCase().includes('upgrade') ||
+                            (item.saudeBateria != null && item.saudeBateria !== '');
+      const descontoVal   = parseFloat(item.desconto || 0);
 
       return {
-        mpVendaId:        item.vendaId,
-        data:             (item.dataVenda || '').slice(0, 10),
-        valor:            parseFloat(item.valorCliente || item.valorTotal || 0),
-        cmvValor:         parseFloat(item.valorCusto || 0),
-        quantidade:       item.quantidade || null,
+        mpVendaId:         item.vendaId,
+        data:              (item.dataVenda || '').slice(0, 10),
+        valor:             parseFloat(item.valorCliente || item.valorTotal || 0),
+        cmvValor:          parseFloat(item.valorCusto || 0),
+        quantidade:        item.quantidade || null,
         categoria,
         subcategoria,
-        descricao:        item.aparelhoDescricao || item.tipoProdutoDescricao || '',
-        pagamento:        mapPagamento(pagamentoRaw),
-        status:           (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
-        vendedorNome:     item.vendedorNome        || '',
-        clienteNome:      item.clienteNome         || '',
-        canalOriginal:    item.canalVendaDescricao || '',
-        pagamentoOriginal: pagamentoRaw,
-        // Expõe todos os campos do item para facilitar debug do mapeamento
-        _camposMp:        Object.keys(item),
-        jaImportado:      idsImportados.has(String(item.vendaId)),
+        descricao:         item.aparelhoDescricao || item.tipoProdutoDescricao || '',
+        pagamento:         '',
+        status:            (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
+        vendedorNome:      item.vendedorNome        || '',
+        clienteNome:       item.clienteNome         || '',
+        tipoVendaOriginal: item.tipoVendaDescricao  || '',
+        canalOriginal:     item.canalVendaDescricao || '',
+        desconto:          descontoVal > 0 ? descontoVal : null,
+        isUpgrade:         isUpgradeAuto,
+        valorUpgrade:      '',
+        jaImportado:       idsImportados.has(String(item.vendaId)),
       };
     });
 
