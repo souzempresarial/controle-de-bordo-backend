@@ -78,6 +78,7 @@ app.use('/clientes/:clienteId/capital/:mesChave', autenticar, autorizar, require
 app.use('/clientes/:clienteId/extrato',           autenticar, autorizar, require('./src/routes/extrato'));
 app.use('/clientes/:clienteId/upgrade',           autenticar, autorizar, require('./src/routes/upgrade'));
 app.use('/clientes/:clienteId/mercadophone',      autenticar, autorizar, require('./src/routes/mercadophone'));
+app.use('/clientes/:clienteId/chat',              autenticar, autorizar, require('./src/routes/agent'));
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
