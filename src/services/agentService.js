@@ -218,7 +218,8 @@ function formatarResultadoConsulta(rows, periodo, tipo) {
   const exibir = rows.slice(0, 8);
 
   const linhas = exibir.map(r => {
-    const [ano, mes, dia] = (r.data || '').slice(0, 10).split('-');
+    const dataISO  = r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data || '').slice(0, 10);
+    const [, mes, dia] = dataISO.split('-');
     const dataStr  = `${dia}/${mes}`;
     const descStr  = r.descricao || r.subcategoria || r.categoria || '—';
     const valorStr = `R$ ${parseFloat(r.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
