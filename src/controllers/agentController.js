@@ -3,7 +3,7 @@ const { processarMensagem } = require('../services/agentService');
 async function chat(req, res) {
   try {
     const { clienteId } = req.params;
-    const { mensagem, historico = [], clienteNome } = req.body;
+    const { mensagem, historico = [], clienteNome, usuarioNome } = req.body;
 
     if (!mensagem || typeof mensagem !== 'string' || !mensagem.trim()) {
       return res.status(400).json({ erro: 'Mensagem não pode ser vazia' });
@@ -12,7 +12,7 @@ async function chat(req, res) {
       return res.status(400).json({ erro: 'Histórico inválido' });
     }
 
-    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome);
+    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome);
     res.json(resultado);
   } catch (err) {
     console.error('[Agent] Erro:', err.message, err.stack);

@@ -54,10 +54,10 @@ function montarHistorico(historico) {
 
 // ---------- Gemini via @google/genai SDK ----------
 
-async function callGemini(mensagem, historico, clienteNome) {
-  const promptBase   = buildSystemPrompt(dataHoraBrasilia());
+async function callGemini(mensagem, historico, clienteNome, usuarioNome) {
+  const promptBase    = buildSystemPrompt(dataHoraBrasilia(), usuarioNome);
   const promptComNome = clienteNome
-    ? `${promptBase}\n\nCliente atual: ${clienteNome}`
+    ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
     : promptBase;
 
   const contents = [
@@ -86,10 +86,10 @@ async function callGemini(mensagem, historico, clienteNome) {
 
 // ---------- DeepSeek fallback ----------
 
-async function callDeepSeek(mensagem, historico, clienteNome) {
-  const promptBase   = buildSystemPrompt(dataHoraBrasilia());
+async function callDeepSeek(mensagem, historico, clienteNome, usuarioNome) {
+  const promptBase    = buildSystemPrompt(dataHoraBrasilia(), usuarioNome);
   const systemContent = clienteNome
-    ? `${promptBase}\n\nCliente atual: ${clienteNome}`
+    ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
     : promptBase;
 
   const messages = [
@@ -127,14 +127,14 @@ async function callDeepSeek(mensagem, historico, clienteNome) {
 
 // ---------- orquestrador com fallback ----------
 
-async function callLLM(mensagem, historico, clienteNome) {
+async function callLLM(mensagem, historico, clienteNome, usuarioNome) {
   try {
-    return await callGemini(mensagem, historico, clienteNome);
+    return await callGemini(mensagem, historico, clienteNome, usuarioNome);
   } catch (err) {
     console.warn('[Agent] Gemini falhou:', err.message, '— tentando DeepSeek...');
     if (process.env.DEEPSEEK_API_KEY) {
       try {
-        return await callDeepSeek(mensagem, historico, clienteNome);
+        return await callDeepSeek(mensagem, historico, clienteNome, usuarioNome);
       } catch (err2) {
         console.warn('[Agent] DeepSeek também falhou:', err2.message);
       }
@@ -243,10 +243,10 @@ function formatarResultadoConsulta(rows, periodo, tipo) {
 
 // ---------- ponto de entrada ----------
 
-async function processarMensagem(mensagem, historico, clienteId, clienteNome) {
-  console.log('[Agent][1] Mensagem recebida:', mensagem);
+async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome) {
+  console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome);
 
-  const textoLLM = await callLLM(mensagem, historico, clienteNome);
+  const textoLLM = await callLLM(mensagem, historico, clienteNome, usuarioNome);
 
   const parsed = parseResposta(textoLLM);
   const { intent_type, body, data: dados = {} } = parsed;
