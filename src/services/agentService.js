@@ -181,7 +181,7 @@ async function criarLancamento(clienteId, tipo, dados) {
 
 // ---------- tool: consultar lançamentos ----------
 
-async function buscarLancamentos(clienteId, startDate, endDate, tipo) {
+async function buscarLancamentos(clienteId, startDate, endDate, tipo, categoria, subcategoria) {
   const params  = [clienteId];
   let   where   = 'cliente_id = $1 AND is_cmv = false AND status != \'Cancelado\'';
 
@@ -196,6 +196,14 @@ async function buscarLancamentos(clienteId, startDate, endDate, tipo) {
   if (tipo) {
     params.push(tipo);
     where += ` AND tipo = $${params.length}`;
+  }
+  if (categoria) {
+    params.push(categoria);
+    where += ` AND categoria ILIKE $${params.length}`;
+  }
+  if (subcategoria) {
+    params.push(`%${subcategoria}%`);
+    where += ` AND subcategoria ILIKE $${params.length}`;
   }
 
   const { rows } = await pool.query(
@@ -268,13 +276,15 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome) {
 
   // ── CONSULTAR LANÇAMENTOS ─────────────────────────────────────────────────
   if (intent_type === 'consultar_entrada' || intent_type === 'consultar_saida') {
-    const tipo      = intent_type === 'consultar_entrada' ? 'Entrada' : 'Saída';
-    const startDate = dados.start_date || null;
-    const endDate   = dados.end_date   || null;
-    const periodo   = dados.periodo    || null;
-    console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s periodo=%s', tipo, startDate, endDate, periodo);
+    const tipo        = intent_type === 'consultar_entrada' ? 'Entrada' : 'Saída';
+    const startDate   = dados.start_date   || null;
+    const endDate     = dados.end_date     || null;
+    const periodo     = dados.periodo      || null;
+    const categoria   = dados.categoria    || null;
+    const subcategoria = dados.subcategoria || null;
+    console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s cat=%s sub=%s', tipo, startDate, endDate, categoria, subcategoria);
 
-    const rows = await buscarLancamentos(clienteId, startDate, endDate, tipo);
+    const rows = await buscarLancamentos(clienteId, startDate, endDate, tipo, categoria, subcategoria);
     console.log('[Agent][4] Lançamentos encontrados:', rows.length);
 
     const resposta = formatarResultadoConsulta(rows, periodo, tipo);

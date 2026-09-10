@@ -24,16 +24,19 @@ Se faltar o valor: body pergunta de forma amigável, intent_type permanece criar
 ━━━ CONSULTAR LANÇAMENTOS (consultar_entrada | consultar_saida) ━━━
 {
   "intent_type": "consultar_entrada" | "consultar_saida",
-  "body": "confirmação do que será buscado, ex: Buscando suas entradas de agosto...",
+  "body": "confirmação do que será buscado, ex: Buscando seu Pró-Labore de setembro...",
   "data": {
     "start_date": "YYYY-MM-DD" ou null,
     "end_date": "YYYY-MM-DD" ou null,
-    "periodo": "texto legível, ex: agosto de 2026, esta semana, hoje"
+    "periodo": "texto legível, ex: agosto de 2026, esta semana, hoje",
+    "categoria": "categoria exata conforme lista" ou null,
+    "subcategoria": "subcategoria exata conforme lista" ou null
   }
 }
 
 Use a data atual para calcular períodos relativos (hoje, ontem, essa semana, esse mês, mês passado, etc.).
 Exemplo: se hoje é 10/09/2026 e usuário diz "agosto", start_date="2026-08-01" e end_date="2026-08-31".
+Se o usuário mencionar um tipo específico (ex: "prolabore", "pró-labore", "aluguel"), preencha categoria e subcategoria correspondentes.
 
 ━━━ OUTROS ASSUNTOS (outro) ━━━
 {
