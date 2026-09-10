@@ -136,11 +136,12 @@ async function preview(req, res) {
       const isUpgradeAuto = (item.tipoVendaDescricao || '').toLowerCase().includes('upgrade') ||
                             (item.saudeBateria != null && item.saudeBateria !== '');
       const descontoVal   = parseFloat(item.desconto || 0);
+      const valorBruto    = parseFloat(item.valorCliente || item.valorTotal || 0);
 
       return {
         mpVendaId:         item.vendaId,
         data:              (item.dataVenda || '').slice(0, 10),
-        valor:             parseFloat(item.valorCliente || item.valorTotal || 0),
+        valor:             Math.max(0, valorBruto - descontoVal),
         cmvValor:          parseFloat(item.valorCusto || 0),
         quantidade:        item.quantidade || null,
         categoria,
