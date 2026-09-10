@@ -215,11 +215,20 @@ async function buscarLancamentos(clienteId, startDate, endDate, tipo, categoria,
 }
 
 function formatarResultadoConsulta(rows, periodo, tipo) {
-  const label = tipo === 'Entrada' ? 'entradas' : tipo === 'Saída' ? 'saídas' : 'lançamentos';
-  const periodoStr = periodo ? ` de ${periodo}` : '';
+  const singular = tipo === 'Entrada' ? 'entrada' : tipo === 'Saída' ? 'saída' : 'lançamento';
+  const plural   = tipo === 'Entrada' ? 'entradas' : tipo === 'Saída' ? 'saídas' : 'lançamentos';
+  const label    = rows.length === 1 ? singular : plural;
+
+  const periodoPrep = periodo
+    ? ' ' + (`de ${periodo}`)
+        .replace('de esta ', 'desta ')
+        .replace('de esse ', 'desse ')
+        .replace('de este ', 'deste ')
+    : '';
+  const periodoStr = periodoPrep;
 
   if (!rows.length) {
-    return `Nenhum lançamento encontrado${periodoStr}. Tente ajustar o período ou verifique se há dados cadastrados.`;
+    return `Nenhum lançamento encontrado${periodoStr.trim() ? ' ' + periodoStr.trim() : ''}. Tente ajustar o período ou verifique se há dados cadastrados.`;
   }
 
   const total = rows.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
