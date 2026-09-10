@@ -21,7 +21,8 @@ function mapPagamento(canal) {
 }
 
 function mapAcessorioSub(str) {
-  if (str.includes('cabo') || str.includes('carregador') || str.includes('fonte')) return 'Cabo / Carregador';
+  if (str.includes('fonte')) return 'Fonte Turbo';
+  if (str.includes('cabo') || str.includes('carregador')) return 'Cabo / Carregador';
   if (str.includes('pelicula') || str.includes('película') || str.includes('capa') || str.includes('case')) return 'Capa e Película';
   return 'Acessórios Geral';
 }
@@ -43,7 +44,7 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
     return { categoria: 'Aparelhos', subcategoria: 'Upgrade' };
 
   // Acessórios — detecta pela descrição do produto
-  const acessorioKw = ['cabo', 'pelicula', 'película', 'capa', 'case', 'capinha', 'carregador', 'película 3d'];
+  const acessorioKw = ['cabo', 'pelicula', 'película', 'capa', 'case', 'capinha', 'carregador', 'película 3d', 'fonte'];
   if (acessorioKw.some(k => str.includes(k)))
     return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str) };
 
