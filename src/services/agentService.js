@@ -80,7 +80,7 @@ async function callGemini(mensagem, historico, clienteNome) {
   const result = await Promise.race([resultPromise, timeoutPromise]);
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? result.text;
   if (!text) throw new Error('Gemini sem resposta');
-  console.log('[Agent] Gemini ok:', text.slice(0, 100));
+  console.log('[Agent][Gemini] Resposta bruta:', text.slice(0, 300));
   return text;
 }
 
@@ -116,7 +116,7 @@ async function callDeepSeek(mensagem, historico, clienteNome) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error?.message || 'DeepSeek error');
     const text = data.choices[0].message.content;
-    console.log('[Agent] DeepSeek ok:', text.slice(0, 100));
+    console.log('[Agent][DeepSeek] Resposta bruta:', text.slice(0, 300));
     return text;
   } catch (err) {
     clearTimeout(timer);
@@ -181,26 +181,38 @@ async function criarLancamento(clienteId, tipo, dados) {
 // ---------- ponto de entrada ----------
 
 async function processarMensagem(mensagem, historico, clienteId, clienteNome) {
-  const textoLLM = await callLLM(mensagem, historico, clienteNome);
-  const parsed   = parseResposta(textoLLM);
+  console.log('[Agent][1] Mensagem recebida:', mensagem);
 
+  const textoLLM = await callLLM(mensagem, historico, clienteNome);
+
+  const parsed = parseResposta(textoLLM);
   const { intent_type, body, data: dados = {} } = parsed;
+  console.log('[Agent][2] Intent:', intent_type, '| Dados:', JSON.stringify(dados));
 
   if (intent_type === 'criar_entrada' || intent_type === 'criar_saida') {
     const valorNum = normalizeValor(dados.valor);
+    console.log('[Agent][3] Tool: criarLancamento | valor normalizado:', valorNum, '| data raw:', dados.data);
 
     if (!valorNum || valorNum <= 0) {
+      console.log('[Agent][4] Valor inválido, retornando sem lançamento');
       return { resposta: body || 'Qual foi o valor?', acao: null };
     }
 
-    const tipo     = intent_type === 'criar_entrada' ? 'Entrada' : 'Saída';
-    const dataISO  = normalizeData(dados.data);
-    const lancamento = await criarLancamento(clienteId, tipo, { ...dados, valor: valorNum, data: dataISO });
+    const tipo       = intent_type === 'criar_entrada' ? 'Entrada' : 'Saída';
+    const dataISO    = normalizeData(dados.data);
+    console.log('[Agent][3] Params: tipo=%s valor=%s data=%s categoria=%s', tipo, valorNum, dataISO, dados.categoria);
 
-    return { resposta: body || `${tipo} de R$ ${valorNum.toLocaleString('pt-BR')} registrada!`, acao: tipo, lancamento };
+    const lancamento = await criarLancamento(clienteId, tipo, { ...dados, valor: valorNum, data: dataISO });
+    console.log('[Agent][4] Lançamento criado:', JSON.stringify(lancamento));
+
+    const resposta = body || `${tipo} de R$ ${valorNum.toLocaleString('pt-BR')} registrada!`;
+    console.log('[Agent][5] Resposta final:', resposta);
+    return { resposta, acao: tipo, lancamento };
   }
 
-  return { resposta: body || 'Como posso ajudar?', acao: null };
+  const resposta = body || 'Como posso ajudar?';
+  console.log('[Agent][3] Sem tool. Resposta final:', resposta);
+  return { resposta, acao: null };
 }
 
 module.exports = { processarMensagem };
