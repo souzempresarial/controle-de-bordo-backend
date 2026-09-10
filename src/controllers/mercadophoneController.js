@@ -98,6 +98,17 @@ async function salvarChave(req, res) {
   }
 }
 
+async function removerChave(req, res) {
+  try {
+    const { clienteId } = req.params;
+    await pool.query('UPDATE clientes SET mercadophone_api_key = NULL WHERE id = $1', [clienteId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[MP removerChave]', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+}
+
 async function preview(req, res) {
   try {
     const { clienteId } = req.params;
@@ -227,4 +238,4 @@ async function importar(req, res) {
   }
 }
 
-module.exports = { status, salvarChave, preview, importar };
+module.exports = { status, salvarChave, removerChave, preview, importar };
