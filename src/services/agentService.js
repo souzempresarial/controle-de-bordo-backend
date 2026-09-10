@@ -1,5 +1,5 @@
-﻿const { GoogleGenAI } = require('@google/genai');
-const { SYSTEM_PROMPT } = require('../prompts/agentPrompt');
+const { GoogleGenAI } = require('@google/genai');
+const { buildSystemPrompt, dataHoraBrasilia } = require('../prompts/agentPrompt');
 const pool = require('../models/db');
 
 const GEMINI_MODEL  = 'gemini-3.6-flash';
@@ -41,7 +41,6 @@ function normalizeData(d) {
   return hojeISO();
 }
 
-
 // ---------- historico para o modelo ----------
 
 function montarHistorico(historico) {
@@ -56,9 +55,10 @@ function montarHistorico(historico) {
 // ---------- Gemini via @google/genai SDK ----------
 
 async function callGemini(mensagem, historico, clienteNome) {
+  const promptBase   = buildSystemPrompt(dataHoraBrasilia());
   const promptComNome = clienteNome
-    ? `${SYSTEM_PROMPT}\n\nCliente atual: ${clienteNome}`
-    : SYSTEM_PROMPT;
+    ? `${promptBase}\n\nCliente atual: ${clienteNome}`
+    : promptBase;
 
   const contents = [
     { role: 'user',  parts: [{ text: promptComNome }] },
@@ -87,9 +87,10 @@ async function callGemini(mensagem, historico, clienteNome) {
 // ---------- DeepSeek fallback ----------
 
 async function callDeepSeek(mensagem, historico, clienteNome) {
+  const promptBase   = buildSystemPrompt(dataHoraBrasilia());
   const systemContent = clienteNome
-    ? `${SYSTEM_PROMPT}\n\nCliente atual: ${clienteNome}`
-    : SYSTEM_PROMPT;
+    ? `${promptBase}\n\nCliente atual: ${clienteNome}`
+    : promptBase;
 
   const messages = [
     { role: 'system', content: systemContent },
@@ -178,6 +179,59 @@ async function criarLancamento(clienteId, tipo, dados) {
   return rows[0];
 }
 
+// ---------- tool: consultar lançamentos ----------
+
+async function buscarLancamentos(clienteId, startDate, endDate, tipo) {
+  const params  = [clienteId];
+  let   where   = 'cliente_id = $1 AND is_cmv = false AND status != \'Cancelado\'';
+
+  if (startDate) {
+    params.push(startDate);
+    where += ` AND data >= $${params.length}`;
+  }
+  if (endDate) {
+    params.push(endDate);
+    where += ` AND data <= $${params.length}`;
+  }
+  if (tipo) {
+    params.push(tipo);
+    where += ` AND tipo = $${params.length}`;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT id, tipo, valor, data, categoria, subcategoria, descricao, pagamento
+     FROM lancamentos WHERE ${where} ORDER BY data DESC LIMIT 100`,
+    params
+  );
+  return rows;
+}
+
+function formatarResultadoConsulta(rows, periodo, tipo) {
+  const label = tipo === 'Entrada' ? 'entradas' : tipo === 'Saída' ? 'saídas' : 'lançamentos';
+  const periodoStr = periodo ? ` de ${periodo}` : '';
+
+  if (!rows.length) {
+    return `Nenhum lançamento encontrado${periodoStr}. Tente ajustar o período ou verifique se há dados cadastrados.`;
+  }
+
+  const total = rows.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+  const exibir = rows.slice(0, 8);
+
+  const linhas = exibir.map(r => {
+    const [ano, mes, dia] = (r.data || '').slice(0, 10).split('-');
+    const dataStr  = `${dia}/${mes}`;
+    const descStr  = r.descricao || r.subcategoria || r.categoria || '—';
+    const valorStr = `R$ ${parseFloat(r.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+    return `• ${dataStr} — ${descStr} — ${valorStr}`;
+  });
+
+  let texto = `${rows.length} ${label}${periodoStr}:\n\n${linhas.join('\n')}`;
+  if (rows.length > 8) texto += `\n... e mais ${rows.length - 8} lançamentos`;
+  texto += `\n\nTotal: R$ ${total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+
+  return texto;
+}
+
 // ---------- ponto de entrada ----------
 
 async function processarMensagem(mensagem, historico, clienteId, clienteNome) {
@@ -189,6 +243,7 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome) {
   const { intent_type, body, data: dados = {} } = parsed;
   console.log('[Agent][2] Intent:', intent_type, '| Dados:', JSON.stringify(dados));
 
+  // ── CRIAR LANÇAMENTO ──────────────────────────────────────────────────────
   if (intent_type === 'criar_entrada' || intent_type === 'criar_saida') {
     const valorNum = normalizeValor(dados.valor);
     console.log('[Agent][3] Tool: criarLancamento | valor normalizado:', valorNum, '| data raw:', dados.data);
@@ -210,6 +265,23 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome) {
     return { resposta, acao: tipo, lancamento };
   }
 
+  // ── CONSULTAR LANÇAMENTOS ─────────────────────────────────────────────────
+  if (intent_type === 'consultar_entrada' || intent_type === 'consultar_saida') {
+    const tipo      = intent_type === 'consultar_entrada' ? 'Entrada' : 'Saída';
+    const startDate = dados.start_date || null;
+    const endDate   = dados.end_date   || null;
+    const periodo   = dados.periodo    || null;
+    console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s periodo=%s', tipo, startDate, endDate, periodo);
+
+    const rows = await buscarLancamentos(clienteId, startDate, endDate, tipo);
+    console.log('[Agent][4] Lançamentos encontrados:', rows.length);
+
+    const resposta = formatarResultadoConsulta(rows, periodo, tipo);
+    console.log('[Agent][5] Resposta final (consulta):', resposta.slice(0, 200));
+    return { resposta, acao: null };
+  }
+
+  // ── OUTRO ─────────────────────────────────────────────────────────────────
   const resposta = body || 'Como posso ajudar?';
   console.log('[Agent][3] Sem tool. Resposta final:', resposta);
   return { resposta, acao: null };
