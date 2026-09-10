@@ -5,6 +5,7 @@ const autenticar = require('../middleware/autenticar');
 
 // Públicas
 router.post('/login',                controller.login);
+router.post('/google',               controller.loginGoogle);
 router.post('/logout',               controller.logout);
 router.post('/registro',             controller.registrarPublico);
 router.get('/verificar/:token',      controller.verificarEmail);

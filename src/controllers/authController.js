@@ -46,6 +46,91 @@ async function enviarEmailVerificacao(email, nome, token) {
   );
 }
 
+// ─── Login com Google ────────────────────────────────────────────────────────
+
+async function loginGoogle(req, res) {
+  try {
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ erro: 'Token Google obrigatório' });
+
+    const verifyResp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+    const info = await verifyResp.json();
+
+    if (!verifyResp.ok || info.error_description) {
+      return res.status(401).json({ erro: 'Token Google inválido' });
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (clientId && info.aud !== clientId) {
+      return res.status(401).json({ erro: 'Token não autorizado' });
+    }
+
+    const { email, name } = info;
+    if (!email) return res.status(401).json({ erro: 'E-mail não disponível' });
+
+    let { rows } = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
+    let usuario = rows[0];
+
+    if (!usuario) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const nomeFinal = name || email.split('@')[0];
+        const { rows: [novoCliente] } = await client.query(
+          'INSERT INTO clientes (nome) VALUES ($1) RETURNING id',
+          [nomeFinal]
+        );
+        const placeholderHash = `google:${crypto.randomBytes(32).toString('hex')}`;
+        const { rows: [novoUsuario] } = await client.query(
+          `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado)
+           VALUES ($1,$2,'cliente',$3,$4,true) RETURNING *`,
+          [email.toLowerCase(), placeholderHash, novoCliente.id, nomeFinal]
+        );
+        await client.query('COMMIT');
+        usuario = novoUsuario;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    if (usuario.ativo === false) {
+      return res.status(403).json({ erro: 'Conta desativada. Entre em contato com o suporte.' });
+    }
+
+    const token = jwt.sign(
+      { id: usuario.id, papel: usuario.papel, clienteId: usuario.cliente_id },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('sf_token', token, {
+      httpOnly: true,
+      secure:   isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge:   8 * 60 * 60 * 1000,
+    });
+
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+    pool.query('UPDATE usuarios SET ultimo_acesso = NOW(), ultimo_ip = $1 WHERE id = $2', [ip, usuario.id]).catch(() => {});
+    pool.query('INSERT INTO log_acessos (usuario_id, email, nome, ip) VALUES ($1, $2, $3, $4)', [usuario.id, usuario.email, usuario.nome || null, ip]).catch(() => {});
+
+    let cliente = null;
+    if ((usuario.papel === 'cliente' || usuario.papel === 'funcionario') && usuario.cliente_id) {
+      const { rows: cRows } = await pool.query('SELECT id, nome, cor, obs FROM clientes WHERE id = $1', [usuario.cliente_id]);
+      cliente = cRows[0] || null;
+    }
+
+    res.json({ papel: usuario.papel, clienteId: usuario.cliente_id, nome: usuario.nome, cliente, permissoes: usuario.permissoes || null });
+  } catch (err) {
+    console.error('[loginGoogle]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
 // ─── Login ───────────────────────────────────────────────────────────────────
 
 async function login(req, res) {
@@ -603,7 +688,7 @@ function tokenExtrato(req, res) {
 }
 
 module.exports = {
-  login, logout, tokenExtrato,
+  login, loginGoogle, logout, tokenExtrato,
   registrarPublico, verificarEmail, reenviarVerificacao,
   esqueceuSenha, redefinirSenhaPorToken,
   registrarAdmin, criarUsuario, listarUsuarios, excluirUsuario, toggleAtivo, atualizarPlano, atualizarEmail, atualizarPermissoes,
