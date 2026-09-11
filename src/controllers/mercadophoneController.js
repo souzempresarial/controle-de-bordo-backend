@@ -2,9 +2,12 @@
 
 const MP_BASE = 'https://platform.mercadophone.tech/api/v1';
 
-async function getApiKey(clienteId) {
-  const { rows } = await pool.query('SELECT mercadophone_api_key FROM clientes WHERE id = $1', [clienteId]);
-  return rows[0]?.mercadophone_api_key || null;
+async function getApiKeys(clienteId) {
+  const { rows } = await pool.query(
+    'SELECT id, nome, api_key FROM mercadophone_chaves WHERE cliente_id = $1 AND ativa = true ORDER BY id',
+    [clienteId]
+  );
+  return rows;
 }
 
 function mapPagamento(canal) {
@@ -78,30 +81,49 @@ function mapCmvSub(subcategoria, categoria) {
 
 async function status(req, res) {
   try {
-    const apiKey = await getApiKey(req.params.clienteId);
-    res.json({ configurado: !!apiKey });
+    const keys = await getApiKeys(req.params.clienteId);
+    res.json({ configurado: keys.length > 0, total: keys.length });
   } catch (err) {
     res.status(500).json({ erro: 'Erro interno' });
   }
 }
 
-async function salvarChave(req, res) {
+async function listarChaves(req, res) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, nome, LEFT(api_key, 6) || \'...\' || RIGHT(api_key, 4) AS api_key_masked, ativa, criado_em FROM mercadophone_chaves WHERE cliente_id = $1 ORDER BY id',
+      [req.params.clienteId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[MP listarChaves]', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+async function adicionarChave(req, res) {
   try {
     const { clienteId } = req.params;
-    const { apiKey } = req.body;
+    const { apiKey, nome } = req.body;
     if (!apiKey) return res.status(400).json({ erro: 'Chave obrigatória' });
-    await pool.query('UPDATE clientes SET mercadophone_api_key = $1 WHERE id = $2', [apiKey, clienteId]);
-    res.json({ ok: true });
+    const { rows } = await pool.query(
+      'INSERT INTO mercadophone_chaves (cliente_id, nome, api_key) VALUES ($1, $2, $3) RETURNING id, nome',
+      [clienteId, nome || 'Principal', apiKey]
+    );
+    res.json({ ok: true, chave: rows[0] });
   } catch (err) {
-    console.error('[MP salvarChave]', err.message);
+    console.error('[MP adicionarChave]', err.message);
     res.status(500).json({ erro: err.message });
   }
 }
 
 async function removerChave(req, res) {
   try {
-    const { clienteId } = req.params;
-    await pool.query('UPDATE clientes SET mercadophone_api_key = NULL WHERE id = $1', [clienteId]);
+    const { clienteId, chaveId } = req.params;
+    await pool.query(
+      'DELETE FROM mercadophone_chaves WHERE id = $1 AND cliente_id = $2',
+      [chaveId, clienteId]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error('[MP removerChave]', err.message);
@@ -109,26 +131,40 @@ async function removerChave(req, res) {
   }
 }
 
+// mantido para compatibilidade com chave legada
+async function salvarChave(req, res) {
+  return adicionarChave(req, res);
+}
+
 async function preview(req, res) {
   try {
     const { clienteId } = req.params;
     const { dataInicio, dataFim } = req.body;
 
-    const apiKey = await getApiKey(clienteId);
-    if (!apiKey) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
+    const chaves = await getApiKeys(clienteId);
+    if (!chaves.length) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
 
     const params = new URLSearchParams({ limit: 300, direction: 'desc' });
     if (dataInicio) params.append('dataVendaInicial', dataInicio);
     if (dataFim)    params.append('dataVendaFinal',   dataFim);
 
-    const mpResp = await fetch(`${MP_BASE}/sales/history?${params}`, {
-      headers: { 'X-API-Key': apiKey },
-    });
-    if (!mpResp.ok) {
-      const err = await mpResp.json().catch(() => ({}));
-      throw new Error(err.detail || err.message || `Erro ${mpResp.status} no Mercado Phone`);
+    // Busca em todas as chaves e merge por vendaId
+    const itemsMap = new Map();
+    for (const chave of chaves) {
+      const mpResp = await fetch(`${MP_BASE}/sales/history?${params}`, {
+        headers: { 'X-API-Key': chave.api_key },
+      });
+      if (!mpResp.ok) {
+        const err = await mpResp.json().catch(() => ({}));
+        console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
+        continue;
+      }
+      const { items = [] } = await mpResp.json();
+      for (const item of items) {
+        if (!itemsMap.has(item.vendaId)) itemsMap.set(item.vendaId, item);
+      }
     }
-    const { items = [] } = await mpResp.json();
+    const items = [...itemsMap.values()];
 
     // IDs já importados via MP
     const { rows: existentes } = await pool.query(
@@ -252,4 +288,4 @@ async function importar(req, res) {
   }
 }
 
-module.exports = { status, salvarChave, removerChave, preview, importar };
+module.exports = { status, listarChaves, adicionarChave, salvarChave, removerChave, preview, importar };

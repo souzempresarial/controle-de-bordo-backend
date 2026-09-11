@@ -9,6 +9,24 @@ CREATE TABLE IF NOT EXISTS clientes (
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS mercadophone_api_key TEXT;
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS simulador_cfg JSONB;
 
+-- Múltiplas chaves MP por cliente
+CREATE TABLE IF NOT EXISTS mercadophone_chaves (
+  id         SERIAL PRIMARY KEY,
+  cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+  nome       VARCHAR(100) NOT NULL DEFAULT 'Principal',
+  api_key    TEXT NOT NULL,
+  ativa      BOOLEAN DEFAULT true,
+  criado_em  TIMESTAMP DEFAULT NOW()
+);
+-- Migra chave existente para a nova tabela (roda só se ainda não migrou)
+INSERT INTO mercadophone_chaves (cliente_id, nome, api_key)
+SELECT id, 'Principal', mercadophone_api_key
+FROM clientes
+WHERE mercadophone_api_key IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM mercadophone_chaves WHERE cliente_id = clientes.id
+  );
+
 -- LANÇAMENTOS
 CREATE TABLE IF NOT EXISTS lancamentos (
   id             SERIAL PRIMARY KEY,
