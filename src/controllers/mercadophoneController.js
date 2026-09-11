@@ -219,8 +219,6 @@ async function preview(req, res) {
         item.canalVendaDescricao, item.marcaDescricao
       );
 
-      const isUpgradeAuto = (item.tipoVendaDescricao || '').toLowerCase().includes('upgrade') ||
-                            (item.saudeBateria != null && item.saudeBateria !== '');
       const descontoVal   = parseFloat(item.desconto || 0);
       const qty           = parseInt(item.quantidade || 1);
       // valorUnitario × qty = faturamento real (coincide com relatório do MP)
@@ -231,6 +229,20 @@ async function preview(req, res) {
         : parseFloat(item.valorCliente || item.valorTotal || 0);
       const valorFinal    = Math.max(0, valorBruto - descontoVal);
       const chaveMP       = `${(item.dataVenda || '').slice(0, 10)}-${valorFinal.toFixed(2)}`;
+
+      // Pagamentos — detecta aparelho (trade-in) e forma de pagamento em dinheiro
+      const pagamentos    = Array.isArray(item.pagamentos) ? item.pagamentos : [];
+      const pagAparel     = pagamentos.find(p =>
+        (p.sigla || p.tipo || '').toLowerCase().includes('aparelho') ||
+        (p.siglaMeioPagamento || '').toLowerCase().includes('aparelho')
+      );
+      const pagCash       = pagamentos.find(p => p !== pagAparel);
+      const pagCashStr    = mapPagamento(pagCash?.siglaMeioPagamento || pagCash?.sigla || pagCash?.tipo || '');
+      const valorAparel   = pagAparel ? parseFloat(pagAparel.valor || 0) : 0;
+
+      // Upgrade: pagamento "Aparelho" na venda OU tipoVendaDescricao indica upgrade
+      const isUpgradeAuto = valorAparel > 0 ||
+                            (item.tipoVendaDescricao || '').toLowerCase().includes('upgrade');
 
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = item._mpItemKey || mpItemKey(item.vendaId, descricao);
@@ -246,7 +258,7 @@ async function preview(req, res) {
         categoria,
         subcategoria,
         descricao,
-        pagamento:         '',
+        pagamento:         pagCashStr,
         status:            (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
         vendedorNome:      item.vendedorNome        || '',
         clienteNome:       item.clienteNome         || '',
@@ -254,7 +266,7 @@ async function preview(req, res) {
         canalOriginal:     item.canalVendaDescricao || '',
         desconto:          descontoVal > 0 ? descontoVal : null,
         isUpgrade:         isUpgradeAuto,
-        valorUpgrade:      '',
+        valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         jaImportado:       jaImp,
         possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
         chaveNome:         item._chaveNome || '',
