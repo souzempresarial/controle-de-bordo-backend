@@ -65,6 +65,12 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   return { categoria: 'Aparelhos', subcategoria: 'Outro' };
 }
 
+// Chave única por produto dentro de uma venda (vendaId pode ter múltiplos produtos)
+function mpItemKey(vendaId, descricao) {
+  const slug = (descricao || 'X').slice(0, 20).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+  return `${vendaId}:${slug}`;
+}
+
 function mapCmvSub(subcategoria, categoria) {
   if ((categoria || '').toLowerCase().includes('acess'))   return 'Acessórios';
   if ((categoria || '').toLowerCase().includes('assist'))  return 'Assistência Técnica';
@@ -148,7 +154,7 @@ async function preview(req, res) {
     if (dataInicio) params.append('dataVendaInicial', dataInicio);
     if (dataFim)    params.append('dataVendaFinal',   dataFim);
 
-    // Busca em todas as chaves e merge por vendaId; guarda nome da unidade de origem
+    // Busca em todas as chaves; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
     const itemsMap = new Map();
     for (const chave of chaves) {
       const mpResp = await fetch(`${MP_BASE}/sales/history?${params}`, {
@@ -161,21 +167,27 @@ async function preview(req, res) {
       }
       const { items = [] } = await mpResp.json();
       for (const item of items) {
-        if (!itemsMap.has(item.vendaId)) {
-          itemsMap.set(item.vendaId, { ...item, _chaveNome: chave.nome });
+        const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
+        const key  = mpItemKey(item.vendaId, desc);
+        if (!itemsMap.has(key)) {
+          itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
         }
       }
     }
     const items = [...itemsMap.values()];
 
-    // IDs já importados via MP
+    // Chaves já importadas (suporta formato novo "vendaId:slug" e legado "vendaId")
     const { rows: existentes } = await pool.query(
       `SELECT obs FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[MP-%'`,
       [clienteId]
     );
-    const idsImportados = new Set(
-      existentes.map(r => r.obs?.match(/\[MP-(\d+)\]/)?.[1]).filter(Boolean)
-    );
+    const idsImportados = new Set();
+    existentes.forEach(r => {
+      const match = r.obs?.match(/\[MP-([^\] ]+)\]/)?.[1];
+      if (!match) return;
+      idsImportados.add(match);              // chave exata (novo: "123:IPHONE" ou legado: "123")
+      idsImportados.add(match.split(':')[0]); // sempre adiciona só o vendaId para compat
+    });
 
     // Lançamentos manuais (sem tag MP) — para detectar possíveis duplicatas
     const { rows: manuais } = await pool.query(
@@ -201,15 +213,20 @@ async function preview(req, res) {
       const valorFinal    = Math.max(0, valorBruto - descontoVal);
       const chaveMP       = `${(item.dataVenda || '').slice(0, 10)}-${valorFinal.toFixed(2)}`;
 
+      const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
+      const itemKey    = item._mpItemKey || mpItemKey(item.vendaId, descricao);
+      const jaImp      = idsImportados.has(itemKey) || idsImportados.has(String(item.vendaId));
+
       return {
         mpVendaId:         item.vendaId,
+        mpItemKey:         itemKey,
         data:              (item.dataVenda || '').slice(0, 10),
         valor:             valorFinal,
         cmvValor:          parseFloat(item.valorCusto || 0),
         quantidade:        item.quantidade || null,
         categoria,
         subcategoria,
-        descricao:         item.aparelhoDescricao || item.tipoProdutoDescricao || '',
+        descricao,
         pagamento:         '',
         status:            (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
         vendedorNome:      item.vendedorNome        || '',
@@ -219,8 +236,8 @@ async function preview(req, res) {
         desconto:          descontoVal > 0 ? descontoVal : null,
         isUpgrade:         isUpgradeAuto,
         valorUpgrade:      '',
-        jaImportado:       idsImportados.has(String(item.vendaId)),
-        possivelDuplicata: !idsImportados.has(String(item.vendaId)) && valorFinal > 0 && chavesManuais.has(chaveMP),
+        jaImportado:       jaImp,
+        possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
         chaveNome:         item._chaveNome || '',
       };
     });
@@ -246,7 +263,8 @@ async function importar(req, res) {
       const upgradeVal  = t.valorUpgrade && parseFloat(t.valorUpgrade) > 0 ? parseFloat(t.valorUpgrade) : null;
       const isDowngrade = upgradeVal != null && upgradeVal > t.valor;
       const grupoId     = (t.cmvValor > 0 || isDowngrade) ? `g${Date.now()}${t.mpVendaId}` : null;
-      const obs         = `[MP-${t.mpVendaId}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
+      const mpKey       = t.mpItemKey || String(t.mpVendaId);
+      const obs         = `[MP-${mpKey}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
 
       await pool.query(
         `INSERT INTO lancamentos
