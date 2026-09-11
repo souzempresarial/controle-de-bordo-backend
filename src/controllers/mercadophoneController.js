@@ -362,6 +362,10 @@ async function estoqueTotal(req, res) {
         const items = Array.isArray(data) ? data : (data.data || data.items || []);
         if (!items.length) break;
 
+        if (offset === 0) {
+          console.log('[MP inventory campos]', Object.keys(items[0] || {}).join(', '));
+          console.log('[MP inventory item[0]]', JSON.stringify(items[0]));
+        }
         for (const item of items) {
           const qty   = parseInt(item.quantidade || item.quantity || 1);
           const custo = parseFloat(item.valorCusto || item.precoCusto || item.cost_price || 0) * qty;
