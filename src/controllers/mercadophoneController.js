@@ -348,7 +348,7 @@ async function estoqueTotal(req, res) {
     const chaves = await getApiKeys(req.params.clienteId);
     if (!chaves.length) return res.json({ aparelhos: 0, acessorios: 0, total: 0 });
 
-    let aparelhos = 0, acessorios = 0, _debugItem = null;
+    let aparelhos = 0, acessorios = 0;
     const APARELHO_KW = ['iphone', 'samsung', 'motorola', 'xiaomi', 'android', 'celular', 'smartphone', 'aparelho'];
 
     for (const chave of chaves) {
@@ -362,12 +362,8 @@ async function estoqueTotal(req, res) {
         const items = Array.isArray(data) ? data : (data.data || data.items || []);
         if (!items.length) break;
 
-        if (offset === 0 && !_debugItem && items.length > 0) {
-          _debugItem = { _item0: items[0], _item1: items[1] || null };
-        }
         for (const item of items) {
-          const qty   = parseInt(item.quantidade || item.quantity || 1);
-          const custo = parseFloat(item.valorCusto || item.precoCusto || item.cost_price || 0) * qty;
+          const custo = parseFloat(item.valorCusto || item.precoCusto || item.cost_price || 0);
           const desc  = (item.tipoProdutoDescricao || item.nome || item.name || item.produto || '').toLowerCase();
           const cat   = (item.categoria || item.category || '').toLowerCase();
           const isAp  = APARELHO_KW.some(k => desc.includes(k) || cat.includes(k));
@@ -380,7 +376,7 @@ async function estoqueTotal(req, res) {
       }
     }
 
-    res.json({ aparelhos, acessorios, total: aparelhos + acessorios, _debug_item0: _debugItem });
+    res.json({ aparelhos, acessorios, total: aparelhos + acessorios });
   } catch (err) {
     console.error('[MP estoqueTotal]', err.message);
     res.status(500).json({ erro: err.message });
