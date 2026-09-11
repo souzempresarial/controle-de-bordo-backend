@@ -148,7 +148,7 @@ async function preview(req, res) {
     if (dataInicio) params.append('dataVendaInicial', dataInicio);
     if (dataFim)    params.append('dataVendaFinal',   dataFim);
 
-    // Busca em todas as chaves e merge por vendaId
+    // Busca em todas as chaves e merge por vendaId; guarda nome da unidade de origem
     const itemsMap = new Map();
     for (const chave of chaves) {
       const mpResp = await fetch(`${MP_BASE}/sales/history?${params}`, {
@@ -161,7 +161,9 @@ async function preview(req, res) {
       }
       const { items = [] } = await mpResp.json();
       for (const item of items) {
-        if (!itemsMap.has(item.vendaId)) itemsMap.set(item.vendaId, item);
+        if (!itemsMap.has(item.vendaId)) {
+          itemsMap.set(item.vendaId, { ...item, _chaveNome: chave.nome });
+        }
       }
     }
     const items = [...itemsMap.values()];
@@ -219,6 +221,7 @@ async function preview(req, res) {
         valorUpgrade:      '',
         jaImportado:       idsImportados.has(String(item.vendaId)),
         possivelDuplicata: !idsImportados.has(String(item.vendaId)) && valorFinal > 0 && chavesManuais.has(chaveMP),
+        chaveNome:         item._chaveNome || '',
       };
     });
 
