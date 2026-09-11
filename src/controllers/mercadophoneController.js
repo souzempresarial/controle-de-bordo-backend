@@ -362,7 +362,9 @@ async function estoqueTotal(req, res) {
         const items = Array.isArray(data) ? data : (data.data || data.items || []);
         if (!items.length) break;
 
-        if (offset === 0 && !_debugItem) _debugItem = items[0] || null;
+        if (offset === 0 && !_debugItem) {
+          _debugItem = { _rawKeys: Object.keys(data), _rawSample: JSON.stringify(data).slice(0, 500) };
+        }
         for (const item of items) {
           const qty   = parseInt(item.quantidade || item.quantity || 1);
           const custo = parseFloat(item.valorCusto || item.precoCusto || item.cost_price || 0) * qty;
