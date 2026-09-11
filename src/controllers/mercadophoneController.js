@@ -348,7 +348,7 @@ async function estoqueTotal(req, res) {
     const chaves = await getApiKeys(req.params.clienteId);
     if (!chaves.length) return res.json({ aparelhos: 0, acessorios: 0, total: 0 });
 
-    let aparelhos = 0, acessorios = 0;
+    let aparelhos = 0, acessorios = 0, _debugItem = null;
     const APARELHO_KW = ['iphone', 'samsung', 'motorola', 'xiaomi', 'android', 'celular', 'smartphone', 'aparelho'];
 
     for (const chave of chaves) {
@@ -362,10 +362,7 @@ async function estoqueTotal(req, res) {
         const items = Array.isArray(data) ? data : (data.data || data.items || []);
         if (!items.length) break;
 
-        if (offset === 0) {
-          console.log('[MP inventory campos]', Object.keys(items[0] || {}).join(', '));
-          console.log('[MP inventory item[0]]', JSON.stringify(items[0]));
-        }
+        if (offset === 0 && !_debugItem) _debugItem = items[0] || null;
         for (const item of items) {
           const qty   = parseInt(item.quantidade || item.quantity || 1);
           const custo = parseFloat(item.valorCusto || item.precoCusto || item.cost_price || 0) * qty;
@@ -381,7 +378,7 @@ async function estoqueTotal(req, res) {
       }
     }
 
-    res.json({ aparelhos, acessorios, total: aparelhos + acessorios });
+    res.json({ aparelhos, acessorios, total: aparelhos + acessorios, _debug_item0: _debugItem });
   } catch (err) {
     console.error('[MP estoqueTotal]', err.message);
     res.status(500).json({ erro: err.message });
