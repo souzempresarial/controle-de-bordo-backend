@@ -297,13 +297,16 @@ async function importar(req, res) {
       const mpKey       = t.mpItemKey || String(t.mpVendaId);
       const obs         = `[MP-${mpKey}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
 
+      const deducaoVal    = t.deducao && parseFloat(t.deducao) > 0 ? parseFloat(t.deducao) : null;
+      const valorRecebido = deducaoVal !== null ? t.valor - deducaoVal : null;
+
       await pool.query(
         `INSERT INTO lancamentos
-          (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, grupo_id, is_cmv, valor_upgrade)
-         VALUES ($1,'Entrada',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12)`,
+          (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, quantidade, obs, grupo_id, is_cmv, valor_upgrade, valor_recebido)
+         VALUES ($1,'Entrada',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12,$13)`,
         [clienteId, t.valor, t.data, t.categoria, t.subcategoria || null,
          t.descricao || null, t.pagamento || null, t.status || 'Confirmado',
-         t.quantidade ?? null, obs, grupoId, upgradeVal]
+         t.quantidade ?? null, obs, grupoId, upgradeVal, valorRecebido]
       );
 
       if (t.cmvValor > 0) {
