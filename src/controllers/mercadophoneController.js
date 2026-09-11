@@ -343,4 +343,45 @@ async function importar(req, res) {
   }
 }
 
-module.exports = { status, listarChaves, adicionarChave, salvarChave, removerChave, preview, importar };
+async function estoqueTotal(req, res) {
+  try {
+    const chaves = await getApiKeys(req.params.clienteId);
+    if (!chaves.length) return res.json({ aparelhos: 0, acessorios: 0, total: 0 });
+
+    let aparelhos = 0, acessorios = 0;
+    const APARELHO_KW = ['iphone', 'samsung', 'motorola', 'xiaomi', 'android', 'celular', 'smartphone', 'aparelho'];
+
+    for (const chave of chaves) {
+      let offset = 0;
+      while (true) {
+        const r = await fetch(`${MP_BASE}/inventory?limit=300&offset=${offset}`, {
+          headers: { 'X-API-Key': chave.api_key, 'Content-Type': 'application/json' },
+        });
+        if (!r.ok) break;
+        const data = await r.json();
+        const items = Array.isArray(data) ? data : (data.data || data.items || []);
+        if (!items.length) break;
+
+        for (const item of items) {
+          const qty   = parseInt(item.quantidade || item.quantity || 1);
+          const custo = parseFloat(item.valorCusto || item.precoCusto || item.cost_price || 0) * qty;
+          const desc  = (item.tipoProdutoDescricao || item.nome || item.name || item.produto || '').toLowerCase();
+          const cat   = (item.categoria || item.category || '').toLowerCase();
+          const isAp  = APARELHO_KW.some(k => desc.includes(k) || cat.includes(k));
+          if (isAp) aparelhos += custo;
+          else       acessorios += custo;
+        }
+
+        if (items.length < 300) break;
+        offset += 300;
+      }
+    }
+
+    res.json({ aparelhos, acessorios, total: aparelhos + acessorios });
+  } catch (err) {
+    console.error('[MP estoqueTotal]', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+module.exports = { status, listarChaves, adicionarChave, salvarChave, removerChave, preview, importar, estoqueTotal };

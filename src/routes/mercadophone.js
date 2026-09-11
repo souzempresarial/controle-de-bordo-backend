@@ -9,5 +9,6 @@ router.delete('/chaves/:chaveId', ctrl.removerChave);
 router.put('/chave',             ctrl.salvarChave);   // legado
 router.post('/preview',          ctrl.preview);
 router.post('/importar',         ctrl.importar);
+router.get('/estoque-total',     ctrl.estoqueTotal);
 
 module.exports = router;
