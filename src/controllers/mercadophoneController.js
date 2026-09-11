@@ -130,13 +130,24 @@ async function preview(req, res) {
     }
     const { items = [] } = await mpResp.json();
 
-    // IDs já importados
+    // IDs já importados via MP
     const { rows: existentes } = await pool.query(
       `SELECT obs FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[MP-%'`,
       [clienteId]
     );
     const idsImportados = new Set(
       existentes.map(r => r.obs?.match(/\[MP-(\d+)\]/)?.[1]).filter(Boolean)
+    );
+
+    // Lançamentos manuais (sem tag MP) — para detectar possíveis duplicatas
+    const { rows: manuais } = await pool.query(
+      `SELECT data::text, valor FROM lancamentos
+       WHERE cliente_id = $1 AND tipo = 'Entrada'
+       AND (obs IS NULL OR obs NOT LIKE '[MP-%')`,
+      [clienteId]
+    );
+    const chavesManuais = new Set(
+      manuais.map(r => `${r.data.slice(0, 10)}-${parseFloat(r.valor).toFixed(2)}`)
     );
 
     const transacoes = items.map(item => {
@@ -149,11 +160,13 @@ async function preview(req, res) {
                             (item.saudeBateria != null && item.saudeBateria !== '');
       const descontoVal   = parseFloat(item.desconto || 0);
       const valorBruto    = parseFloat(item.valorCliente || item.valorTotal || 0);
+      const valorFinal    = Math.max(0, valorBruto - descontoVal);
+      const chaveMP       = `${(item.dataVenda || '').slice(0, 10)}-${valorFinal.toFixed(2)}`;
 
       return {
         mpVendaId:         item.vendaId,
         data:              (item.dataVenda || '').slice(0, 10),
-        valor:             Math.max(0, valorBruto - descontoVal),
+        valor:             valorFinal,
         cmvValor:          parseFloat(item.valorCusto || 0),
         quantidade:        item.quantidade || null,
         categoria,
@@ -169,6 +182,7 @@ async function preview(req, res) {
         isUpgrade:         isUpgradeAuto,
         valorUpgrade:      '',
         jaImportado:       idsImportados.has(String(item.vendaId)),
+        possivelDuplicata: !idsImportados.has(String(item.vendaId)) && valorFinal > 0 && chavesManuais.has(chaveMP),
       };
     });
 
