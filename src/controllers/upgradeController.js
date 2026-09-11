@@ -139,4 +139,24 @@ async function limpar(req, res) {
   }
 }
 
-module.exports = { listar, criar, editar, excluir, vender, limpar };
+async function getSimCfg(req, res) {
+  try {
+    const { rows } = await pool.query('SELECT simulador_cfg FROM clientes WHERE id = $1', [req.params.clienteId]);
+    res.json(rows[0]?.simulador_cfg || null);
+  } catch (err) {
+    console.error('[upgrade.getSimCfg]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
+async function setSimCfg(req, res) {
+  try {
+    await pool.query('UPDATE clientes SET simulador_cfg = $1 WHERE id = $2', [req.body, req.params.clienteId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[upgrade.setSimCfg]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
+module.exports = { listar, criar, editar, excluir, vender, limpar, getSimCfg, setSimCfg };

@@ -5,6 +5,8 @@ const verificarPermissao = require('../middleware/verificarPermissao');
 
 const podeUpgrade = verificarPermissao('upgrade');
 
+router.get('/simulador-cfg',        podeUpgrade, controller.getSimCfg);
+router.put('/simulador-cfg',        podeUpgrade, controller.setSimCfg);
 router.get('/',                    podeUpgrade, controller.listar);
 router.post('/',                   podeUpgrade, controller.criar);
 router.delete('/',                 podeUpgrade, controller.limpar);

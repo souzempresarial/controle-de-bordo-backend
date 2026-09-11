@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   criado_em TIMESTAMP DEFAULT NOW()
 );
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS mercadophone_api_key TEXT;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS simulador_cfg JSONB;
 
 -- LANÇAMENTOS
 CREATE TABLE IF NOT EXISTS lancamentos (
