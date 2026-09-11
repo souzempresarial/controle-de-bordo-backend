@@ -176,17 +176,20 @@ async function preview(req, res) {
     }
     const items = [...itemsMap.values()];
 
-    // Chaves já importadas (suporta formato novo "vendaId:slug" e legado "vendaId")
+    // Chaves já importadas — suporta formato novo "vendaId:slug" e legado "vendaId"
     const { rows: existentes } = await pool.query(
-      `SELECT obs FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[MP-%'`,
+      `SELECT obs, descricao FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[MP-%' AND tipo = 'Entrada'`,
       [clienteId]
     );
     const idsImportados = new Set();
     existentes.forEach(r => {
       const match = r.obs?.match(/\[MP-([^\] ]+)\]/)?.[1];
       if (!match) return;
-      idsImportados.add(match);              // chave exata (novo: "123:IPHONE" ou legado: "123")
-      idsImportados.add(match.split(':')[0]); // sempre adiciona só o vendaId para compat
+      idsImportados.add(match); // chave exata: novo "123:SLUG" ou legado "123"
+      // Para obs legado (sem slug), reconstrói a chave usando a descrição salva
+      if (!match.includes(':') && r.descricao) {
+        idsImportados.add(mpItemKey(match, r.descricao));
+      }
     });
 
     // Lançamentos manuais (sem tag MP) — para detectar possíveis duplicatas
@@ -215,7 +218,7 @@ async function preview(req, res) {
 
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = item._mpItemKey || mpItemKey(item.vendaId, descricao);
-      const jaImp      = idsImportados.has(itemKey) || idsImportados.has(String(item.vendaId));
+      const jaImp      = idsImportados.has(itemKey);
 
       return {
         mpVendaId:         item.vendaId,
