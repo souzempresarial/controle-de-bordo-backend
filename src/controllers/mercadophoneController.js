@@ -166,7 +166,17 @@ async function preview(req, res) {
         continue;
       }
       const { items = [] } = await mpResp.json();
+
+      // Log campos disponíveis na primeira chamada para diagnóstico
+      if (items.length > 0 && chave === chaves[0]) {
+        console.log('[MP campos disponíveis]', Object.keys(items[0]).join(', '));
+        console.log('[MP item[0] raw]', JSON.stringify(items[0]));
+      }
+
       for (const item of items) {
+        // Ignora cancelados — não devem aparecer como pendentes
+        if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
+
         const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
         const key  = mpItemKey(item.vendaId, desc);
         if (!itemsMap.has(key)) {
@@ -212,7 +222,13 @@ async function preview(req, res) {
       const isUpgradeAuto = (item.tipoVendaDescricao || '').toLowerCase().includes('upgrade') ||
                             (item.saudeBateria != null && item.saudeBateria !== '');
       const descontoVal   = parseFloat(item.desconto || 0);
-      const valorBruto    = parseFloat(item.valorCliente || item.valorTotal || 0);
+      const qty           = parseInt(item.quantidade || 1);
+      // valorUnitario × qty = faturamento real (coincide com relatório do MP)
+      // Fallback para valorCliente/valorTotal caso valorUnitario não exista na resposta
+      const valUnit       = parseFloat(item.valorUnitario ?? NaN);
+      const valorBruto    = !isNaN(valUnit)
+        ? valUnit * qty
+        : parseFloat(item.valorCliente || item.valorTotal || 0);
       const valorFinal    = Math.max(0, valorBruto - descontoVal);
       const chaveMP       = `${(item.dataVenda || '').slice(0, 10)}-${valorFinal.toFixed(2)}`;
 
@@ -225,8 +241,8 @@ async function preview(req, res) {
         mpItemKey:         itemKey,
         data:              (item.dataVenda || '').slice(0, 10),
         valor:             valorFinal,
-        cmvValor:          parseFloat(item.valorCusto || 0),
-        quantidade:        item.quantidade || null,
+        cmvValor:          parseFloat(item.valorCusto || 0) * qty,
+        quantidade:        qty,
         categoria,
         subcategoria,
         descricao,
