@@ -362,8 +362,8 @@ async function estoqueTotal(req, res) {
         const items = Array.isArray(data) ? data : (data.data || data.items || []);
         if (!items.length) break;
 
-        if (offset === 0 && !_debugItem) {
-          _debugItem = { _rawKeys: Object.keys(data), _rawSample: JSON.stringify(data).slice(0, 500) };
+        if (offset === 0 && !_debugItem && items.length > 0) {
+          _debugItem = { _item0: items[0], _item1: items[1] || null };
         }
         for (const item of items) {
           const qty   = parseInt(item.quantidade || item.quantity || 1);
