@@ -203,7 +203,8 @@ async function buscarLancamentos(clienteId, startDate, endDate, tipo, categoria,
   }
   if (subcategoria) {
     params.push(`%${subcategoria}%`);
-    where += ` AND subcategoria ILIKE $${params.length}`;
+    const idx = params.length;
+    where += ` AND (subcategoria ILIKE $${idx} OR descricao ILIKE $${idx})`;
   }
 
   const { rows } = await pool.query(
