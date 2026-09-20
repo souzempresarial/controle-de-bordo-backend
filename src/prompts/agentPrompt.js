@@ -77,7 +77,7 @@ Para outros assuntos:
 
 ━━━ CATEGORIAS DE SAÍDA ━━━
 - Custos Variáveis Diretos → Aparelhos iPhone, Aparelhos Android, iPad, MacBook, Apple Watch, AirPods, Upgrade, Acessórios, Embalagens, Brindes, Assistência Técnica, Perda de Mercadoria, Outros
-- Fornecedores (Estoque) → Aparelhos, Aparelhos (Upgrade), Pix Fornecedor, Acessórios, Embalagens, Brindes, Assistência Técnica, Reparo, Boleto, Outro
+- Fornecedores (Estoque) → Aparelhos, Pix Fornecedor, Acessórios, Embalagens, Brindes, Assistência Técnica, Reparo, Boleto, Outro
 - Deduções das Vendas → Taxas de Maquininha, Estornos, Descontos, Outro
 - Custos Variáveis Indiretos → Comissões do Vendedor, Bônus de Indicação, Motoboy, Freelancers, Horas Extras de Colaboradores, Outro
 - Despesas com Ocupação → Luz, Internet, Água, Aluguel / Condomínio / IPTU, Operadora Celular, Segurança, Outro
@@ -89,9 +89,48 @@ Para outros assuntos:
 - Saídas Não-Operacionais → Suprimentos, Obras, Despesas Extras, Manutenções em Equipamentos, Outro
 - Investimentos → Equipamentos, Reformas, Computadores, Veículos, Outro
 
+━━━ MAPEAMENTO DE PALAVRAS-CHAVE ━━━
+Quando o usuário mencionar termos específicos, mapeie assim:
+
+Entradas:
+- "iPhone", "celular vendido", "aparelho" → Aparelhos > iPhone/Android/etc
+- "acessório", "capa", "película", "cabo" → Acessórios
+- "conserto", "tela", "bateria", "assistência" → Assistência Técnica
+- "upgrade", "troca" → Aparelhos > Upgrade
+
+Saídas — CMV/Custo:
+- "custo do aparelho", "CMV", "compra para revenda", "paguei pelo iPhone" → Custos Variáveis Diretos + sub correspondente
+- "comprou acessório p/ revenda" → Custos Variáveis Diretos > Acessórios
+
+Saídas — Pessoal:
+- "prolabore", "pró-labore", "retirada do sócio" → Despesas com Pessoal > Pró-Labore / PLR
+- "salário", "folha", "pagamento funcionário" → Despesas com Pessoal > Folha de Pagamento
+- "adiantamento", "vale" → Despesas com Pessoal > Adiantamento
+- "comissão", "vendedor" → Custos Variáveis Indiretos > Comissões do Vendedor
+- "motoboy", "entrega" → Custos Variáveis Indiretos > Motoboy
+
+Saídas — Ocupação:
+- "aluguel", "condomínio", "IPTU" → Despesas com Ocupação > Aluguel / Condomínio / IPTU
+- "luz", "energia" → Despesas com Ocupação > Luz
+- "internet", "wi-fi" → Despesas com Ocupação > Internet
+- "operadora", "telefone fixo" → Despesas com Ocupação > Operadora Celular
+
+Saídas — Variáveis:
+- "gasolina", "combustível", "posto", "veículo" → Despesas Variáveis > Veículo
+- "uber", "99" → Despesas Variáveis > Uber
+- "alimentação", "lanche", "refeição" → Despesas Variáveis > Alimentação
+- "fatura de cartão", "cartão PJ" → Despesas Variáveis > Fatura de Cartão
+- "taxa maquininha", "taxa cartão" → Deduções das Vendas > Taxas de Maquininha
+
+Saídas — Impostos / Serviços:
+- "simples", "DAS", "imposto" → Impostos > DAS - Simples Nacional
+- "contador", "contabilidade" → Serviços Terceirizados > Assessoria Contábil
+- "empréstimo", "parcela" → Dívidas / Empréstimos > Parcela de Empréstimo
+
 ━━━ REGRAS ━━━
 1. Nunca invente categorias. Sem correspondência → subcategoria "Outro"
-2. Retorne APENAS o JSON, sem markdown, sem texto fora do JSON`;
+2. Retorne APENAS o JSON, sem markdown, sem texto fora do JSON
+3. Você NUNCA executa ações diretamente. Você só interpreta o pedido e retorna o JSON — o backend é quem grava ou consulta`;
 }
 
 function dataHoraBrasilia() {

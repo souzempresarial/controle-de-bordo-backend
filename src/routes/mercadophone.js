@@ -9,5 +9,7 @@ router.delete('/chaves/:chaveId', ctrl.removerChave);
 router.put('/chave',             ctrl.salvarChave);   // legado
 router.post('/preview',          ctrl.preview);
 router.post('/importar',         ctrl.importar);
+router.post('/os-preview',       ctrl.osPreview);
+router.post('/os-importar',      ctrl.osImportar);
 
 module.exports = router;

@@ -2,6 +2,13 @@
 
 const MP_BASE = 'https://platform.mercadophone.tech/api/v1';
 
+function mpFetch(url, apiKey, timeoutMs = 30000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { headers: { 'X-API-Key': apiKey }, signal: ctrl.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 async function getApiKeys(clienteId) {
   const { rows } = await pool.query(
     'SELECT id, nome, api_key FROM mercadophone_chaves WHERE cliente_id = $1 AND ativa = true ORDER BY id',
@@ -30,6 +37,26 @@ function mapAcessorioSub(str) {
   return 'Acessórios Geral';
 }
 
+function mapOsPagamento(forma) {
+  const f = (forma || '').toLowerCase().replace(/[áàãâä]/g, 'a').replace(/[éèêë]/g, 'e').replace(/[íìîï]/g, 'i').replace(/[óòõôö]/g, 'o').replace(/[úùûü]/g, 'u');
+  if (f.includes('pix'))                                           return 'Pix';
+  if (f.includes('credito'))                                       return 'Crédito';
+  if (f.includes('debito'))                                        return 'Débito';
+  if (f.includes('dinheiro') || f.includes('especie'))             return 'Dinheiro';
+  if (f.includes('transferencia') || f.includes('ted') || f.includes('doc')) return 'Transferência';
+  if (f.includes('boleto'))                                        return 'Boleto';
+  return '';
+}
+
+function mapAssistenciaSub(descricao) {
+  const d = (descricao || '').toLowerCase();
+  if (d.includes('tela') || d.includes('display') || d.includes('vidro'))    return 'Conserto de Tela';
+  if (d.includes('bateria') || d.includes('battery'))                         return 'Troca de Bateria';
+  if (d.includes('traseira') || d.includes('back glass'))                    return 'Troca de Traseira';
+  if (d.includes('doc de carga') || d.includes('conector') || d.includes('carga')) return 'Doc de Carga';
+  return 'Outro';
+}
+
 function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   const tv  = (tipoVenda  || '').toLowerCase();
   const ap  = (aparelho   || '').toLowerCase();
@@ -38,9 +65,9 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   const ma  = (marca      || '').toLowerCase();
   const str = ap || tp;
 
-  // Assistência técnica
+  // Assistência técnica — subcategoria baseada na descrição do serviço
   if (tv.includes('assist') || tv.includes('serviço') || tp.includes('serviço') || tp.includes('reparo'))
-    return { categoria: 'Assistência Técnica', subcategoria: 'Outro' };
+    return { categoria: 'Assistência Técnica', subcategoria: mapAssistenciaSub(str || tv || tp) };
 
   // Upgrade — detecta pelo canal de venda, tipo de venda ou descrição
   if (cv.includes('upgrade') || tv.includes('upgrade') || str.includes('upgrade'))
@@ -157,9 +184,7 @@ async function preview(req, res) {
     // Busca em todas as chaves; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
     const itemsMap = new Map();
     for (const chave of chaves) {
-      const mpResp = await fetch(`${MP_BASE}/sales/history?${params}`, {
-        headers: { 'X-API-Key': chave.api_key },
-      });
+      const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
       if (!mpResp.ok) {
         const err = await mpResp.json().catch(() => ({}));
         console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
@@ -343,4 +368,204 @@ async function importar(req, res) {
   }
 }
 
-module.exports = { status, listarChaves, adicionarChave, salvarChave, removerChave, preview, importar };
+// ── ORDENS DE SERVIÇO ────────────────────────────────────────────────────────
+// Endpoint MP: GET /service-orders (verificar com Bryan se URL/campos estão corretos)
+
+async function osPreview(req, res) {
+  try {
+    const { clienteId } = req.params;
+    const { dataInicio, dataFim } = req.body;
+
+    const chaves = await getApiKeys(clienteId);
+    if (!chaves.length) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
+
+    const STATUS_IMPORTAVEIS = new Set(['finalizado', 'finalizada', 'entregue']);
+    const LIMIT = 300;
+    const itemsMap = new Map();
+
+    for (const chave of chaves) {
+      let offset = 0;
+      while (true) {
+        const params = new URLSearchParams({ limit: LIMIT, direction: 'desc', offset });
+        if (dataInicio) params.append('dataFinalizacaoInicial', dataInicio);
+        if (dataFim)    params.append('dataFinalizacaoFinal',   dataFim);
+
+        const mpResp = await mpFetch(`${MP_BASE}/service-orders?${params}`, chave.api_key);
+        if (!mpResp.ok) {
+          const err = await mpResp.json().catch(() => ({}));
+          console.error(`[MP osPreview] chave ${chave.id} erro ${mpResp.status}:`, JSON.stringify(err).slice(0, 200));
+          break;
+        }
+        const body = await mpResp.json();
+        const items = body.items || body.data || [];
+        const total = body.total || 0;
+
+        for (const item of items) {
+          const statusRaw = (item.situacaoDescricao || '').toLowerCase();
+          if (!STATUS_IMPORTAVEIS.has(statusRaw)) continue;
+          const key = `os:${item.id}`;
+          if (!itemsMap.has(key)) itemsMap.set(key, { ...item, _chaveNome: chave.nome, _chaveId: chave.id, _chaveApiKey: chave.api_key });
+        }
+
+        offset += LIMIT;
+        if (offset >= total || items.length < LIMIT) break;
+      }
+    }
+    const items = [...itemsMap.values()];
+
+    const { rows: existentes } = await pool.query(
+      `SELECT obs FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[OS-%' AND tipo = 'Entrada'`,
+      [clienteId]
+    );
+    const idsImportados = new Set(existentes.map(r => r.obs?.match(/\[OS-([^\]]+)\]/)?.[1]).filter(Boolean));
+
+    const ordens = items.map(item => {
+      const defeito     = (item.defeito     || '').trim();
+      const queixa      = defeito || '';
+      const descricao   = (defeito.length > 70 ? defeito.slice(0, 67) + '…' : defeito)
+        || 'Assistência Técnica';
+      const osId        = String(item.id);
+      const valor       = parseFloat(item.valorTotal || 0);
+      const data        = (item.dataFinalizacao || item.dataCriacao || '').slice(0, 10);
+      const cmvEstimado  = Math.max(0, valor - parseFloat(item.lucro || 0));
+      const subcategoria = valor === 0 ? 'Garantia' : mapAssistenciaSub(defeito + ' ' + (item.tipoDescricao || ''));
+
+      return {
+        osId,
+        codigo:        item.codigo ? `#${item.codigo}` : `#${osId}`,
+        data,
+        valor,
+        cmvEstimado,
+        categoria:     'Assistência Técnica',
+        subcategoria,
+        descricao,
+        queixa,
+        tipoAparelho:  (item.tipoDescricao || '').trim(),
+        status:        'Confirmado',
+        clienteNome:   (item.clienteNome || '').trim(),
+        tecnicoNome:   (item.tecnicoNome  || '').trim(),
+        jaImportado:   idsImportados.has(osId),
+        chaveNome:     item._chaveNome || '',
+        chaveId:       item._chaveId   || chaves[0].id,
+      };
+    });
+
+    // Mapa osId → apiKey para usar a chave correta no detalhe
+    const chaveApiKeyMap = {};
+    for (const item of items) chaveApiKeyMap[String(item.id)] = item._chaveApiKey || chaves[0].api_key;
+
+    // Busca detalhe em lotes de 5 para obter nome da peça/serviço
+    const BATCH = 5;
+    const pendentesParaDetalhe = ordens.filter(o => !o.jaImportado);
+    for (let i = 0; i < pendentesParaDetalhe.length; i += BATCH) {
+      const lote = pendentesParaDetalhe.slice(i, i + BATCH);
+      await Promise.all(lote.map(async (ordem) => {
+        const apiKey = chaveApiKeyMap[ordem.osId] || chaves[0].api_key;
+        const rDet = await mpFetch(`${MP_BASE}/service-orders/${ordem.osId}`, apiKey).catch(() => null);
+        if (!rDet?.ok) return;
+        const det = await rDet.json();
+        const pecas = [
+          ...(det.produtos || []).map(p => (p.descricao || '').trim()).filter(Boolean),
+          ...(det.servicos || []).map(s => (s.descricao || '').trim()).filter(Boolean),
+        ];
+        if (pecas.length) {
+          ordem.descricao = pecas[0];
+        }
+      }));
+    }
+
+    res.json({ ordens });
+  } catch (err) {
+    console.error('[MP osPreview]', err.message);
+    res.status(500).json({ erro: err.message || 'Erro interno' });
+  }
+}
+
+async function osImportar(req, res) {
+  try {
+    const { clienteId } = req.params;
+    const { ordens } = req.body;
+
+    if (!ordens?.length) return res.json({ importados: 0 });
+
+    const chaves = await getApiKeys(clienteId);
+    if (!chaves.length) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
+    const chaveMap = Object.fromEntries(chaves.map(c => [c.id, c.api_key]));
+    const getKey = (chaveId) => chaveMap[chaveId] || chaves[0].api_key;
+
+    const pendentes = ordens.filter(os => !os.jaImportado);
+    let importados = 0;
+    const BATCH = 5;
+
+    for (let i = 0; i < pendentes.length; i += BATCH) {
+      const lote = pendentes.slice(i, i + BATCH);
+
+      await Promise.all(lote.map(async (os) => {
+        // Busca detalhe para CMV real e forma de pagamento
+        let cmvReal = os.cmvEstimado || 0;
+        let pagamento = '';
+        let descricaoFinal = os.descricao;
+
+        const rDet = await mpFetch(`${MP_BASE}/service-orders/${os.osId}`, getKey(os.chaveId)).catch(() => null);
+
+        if (rDet?.ok) {
+          const det = await rDet.json();
+
+          // CMV: usa valor editado pelo usuário se ele alterou explicitamente; senão usa o real da API
+          if (!os.cmvEditado) {
+            const prods = det.produtos || [];
+            const servs = det.servicos || [];
+            cmvReal = prods.reduce((s, p) => s + parseFloat(p.valorCusto || 0), 0)
+                    + servs.reduce((s, sv) => s + parseFloat(sv.valorCusto || 0), 0);
+          }
+
+          // Pagamento: usa seleção do usuário se preencheu; senão usa o da API
+          if (!os.pagamento) {
+            const formas = (det.financeiros || []).flatMap(f => (f.pagamentos || []).map(p => p.formaPagamentoDescricao));
+            pagamento = mapOsPagamento(formas[0] || '');
+          } else {
+            pagamento = os.pagamento;
+          }
+
+          if (!os.descricaoEditada) {
+            const pecas = [
+              ...(det.produtos || []).map(p => (p.descricao || '').trim()).filter(Boolean),
+              ...(det.servicos || []).map(s => (s.descricao || '').trim()).filter(Boolean),
+            ];
+            if (pecas.length) descricaoFinal = pecas[0];
+          }
+        }
+
+        const obs     = `[OS-${os.osId}]${os.tecnicoNome ? ' ' + os.tecnicoNome : ''}`;
+        const grupoId = cmvReal > 0 ? `g${Date.now()}${os.osId}` : null;
+
+        await pool.query(
+          `INSERT INTO lancamentos
+            (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, obs, grupo_id, is_cmv, origem)
+           VALUES ($1,'Entrada',$2,$3,$4,$5,$6,$7,$8,$9,$10,false,'mp')`,
+          [clienteId, os.valor, os.data, 'Assistência Técnica', os.subcategoria || 'Outro',
+           descricaoFinal, pagamento || null, os.status || 'Confirmado', obs, grupoId]
+        );
+
+        if (cmvReal > 0) {
+          await pool.query(
+            `INSERT INTO lancamentos
+              (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, status, obs, grupo_id, is_cmv, origem)
+             VALUES ($1,'Saída',$2,$3,'Custos Variáveis Diretos','Assistência Técnica',$4,$5,$6,$7,true,'mp')`,
+            [clienteId, cmvReal, os.data, `CMV — ${os.descricao}`,
+             os.status || 'Confirmado', `CMV vinculado ao OS-${os.osId}`, grupoId]
+          );
+        }
+
+        importados++;
+      }));
+    }
+
+    res.json({ importados });
+  } catch (err) {
+    console.error('[MP osImportar]', err.message);
+    res.status(500).json({ erro: err.message || 'Erro interno' });
+  }
+}
+
+module.exports = { status, listarChaves, adicionarChave, salvarChave, removerChave, preview, importar, osPreview, osImportar };
