@@ -48,3 +48,9 @@ functions:
     timeout: 60
     events:
       - schedule: cron(0 11 * * ? *)  # 08:00 BRT (11:00 UTC) todos os dias
+
+  analytics:
+    handler: analyticsHandler.gerarAnalytics
+    timeout: 300
+    events:
+      - schedule: cron(0 5 1 * ? *)  # 02:00 BRT (05:00 UTC) no dia 1 de cada mês

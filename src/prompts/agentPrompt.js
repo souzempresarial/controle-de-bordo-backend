@@ -60,6 +60,22 @@ Use a data atual para calcular períodos relativos (hoje, ontem, essa semana, es
 Se o usuário mencionar um tipo específico (ex: "prolabore", "aluguel", "motoboy"), preencha categoria e subcategoria correspondentes.
 Para consultas sem período especificado → use o mês atual.
 
+Para análises históricas e comparativas (consultar_analytics):
+{
+  "intent_type": "consultar_analytics",
+  "body": "Buscando análise...",
+  "data": {
+    "pergunta": "pergunta reformulada de forma específica e completa"
+  }
+}
+
+Use consultar_analytics (não consultar_entrada/saida) quando o usuário pedir:
+- Comparativo entre meses ("qual foi meu melhor mês?", "cresci ou cai em relação ao mês passado?")
+- Análise de tendência ou evolução ("como está meu faturamento ao longo do ano?")
+- Projeções ou médias históricas ("qual minha média mensal?", "vou bater a meta?")
+- Resumo geral de um período passado ("como foi agosto?", "resuma meu trimestre")
+Use consultar_entrada/saida para consultas transacionais diretas ("quanto gastei com gasolina?", "quais foram minhas vendas hoje?").
+
 Para outros assuntos:
 {
   "intent_type": "outro",

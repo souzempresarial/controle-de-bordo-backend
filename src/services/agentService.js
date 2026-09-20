@@ -302,6 +302,27 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
     return { resposta, acao: null };
   }
 
+  // ── CONSULTAR ANALYTICS (RAG) ─────────────────────────────────────────────
+  if (intent_type === 'consultar_analytics') {
+    const { buscarAnalytics, responderComContexto } = require('./analyticsService');
+    const pergunta = dados.pergunta || body || mensagem;
+    console.log('[Agent][3] Tool: buscarAnalytics | pergunta=%s', pergunta);
+
+    const resumos = await buscarAnalytics(clienteId, pergunta);
+    console.log('[Agent][4] Resumos encontrados:', resumos.length);
+
+    if (resumos.length === 0) {
+      return {
+        resposta: 'Ainda não tenho análises históricas geradas para esta conta. Os resumos são criados automaticamente no início de cada mês.',
+        acao: null,
+      };
+    }
+
+    const resposta = await responderComContexto(pergunta, resumos);
+    console.log('[Agent][5] Resposta analytics:', resposta.slice(0, 200));
+    return { resposta, acao: null };
+  }
+
   // ── OUTRO ─────────────────────────────────────────────────────────────────
   const resposta = body || 'Como posso ajudar?';
   console.log('[Agent][3] Sem tool. Resposta final:', resposta);
