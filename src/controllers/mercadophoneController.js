@@ -232,13 +232,18 @@ async function preview(req, res) {
       [clienteId]
     );
     const idsImportados = new Set();
+    // mapa de chave → obs original para debug
+    const idsImportadosObs = new Map();
     existentes.forEach(r => {
       const match = r.obs?.match(/\[MP-([^\] ]+)\]/)?.[1];
       if (!match) return;
-      idsImportados.add(match); // chave exata: novo "123:SLUG" ou legado "123"
+      idsImportados.add(match);
+      idsImportadosObs.set(match, r.obs);
       // Para obs legado (sem slug), reconstrói a chave usando a descrição salva
       if (!match.includes(':') && r.descricao) {
-        idsImportados.add(mpItemKey(match, r.descricao));
+        const k2 = mpItemKey(match, r.descricao);
+        idsImportados.add(k2);
+        idsImportadosObs.set(k2, r.obs);
       }
     });
 
@@ -287,6 +292,9 @@ async function preview(req, res) {
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = item._mpItemKey || mpItemKey(item.vendaId, descricao);
       const jaImp      = idsImportados.has(itemKey);
+      if (jaImp) {
+        console.log('[MP jaImportado]', itemKey, '→ obs no banco:', idsImportadosObs.get(itemKey));
+      }
 
       return {
         mpVendaId:         item.vendaId,
@@ -308,6 +316,7 @@ async function preview(req, res) {
         isUpgrade:         isUpgradeAuto,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         jaImportado:       jaImp,
+        _debugObsMatch:    jaImp ? (idsImportadosObs.get(itemKey) || null) : undefined,
         possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
         chaveNome:         item._chaveNome || '',
       };
