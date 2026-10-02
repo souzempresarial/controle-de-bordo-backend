@@ -177,36 +177,51 @@ async function preview(req, res) {
     const chaves = await getApiKeys(clienteId);
     if (!chaves.length) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
 
-    const params = new URLSearchParams({ limit: 300, direction: 'desc' });
-    if (dataInicio) params.append('dataVendaInicial', dataInicio);
-    if (dataFim)    params.append('dataVendaFinal',   dataFim);
+    const LIMIT = 300;
 
-    // Busca em todas as chaves; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
+    // Busca em todas as chaves com paginação; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
     const itemsMap = new Map();
     for (const chave of chaves) {
-      const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
-      if (!mpResp.ok) {
-        const err = await mpResp.json().catch(() => ({}));
-        console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
-        continue;
-      }
-      const { items = [] } = await mpResp.json();
+      let offset = 0;
+      let primeiraChamada = true;
+      while (true) {
+        const params = new URLSearchParams({ limit: LIMIT, direction: 'desc', offset });
+        if (dataInicio) params.append('dataVendaInicial', dataInicio);
+        if (dataFim)    params.append('dataVendaFinal',   dataFim);
 
-      // Log campos disponíveis na primeira chamada para diagnóstico
-      if (items.length > 0 && chave === chaves[0]) {
-        console.log('[MP campos disponíveis]', Object.keys(items[0]).join(', '));
-        console.log('[MP item[0] raw]', JSON.stringify(items[0]));
-      }
-
-      for (const item of items) {
-        // Ignora cancelados — não devem aparecer como pendentes
-        if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
-
-        const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
-        const key  = mpItemKey(item.vendaId, desc);
-        if (!itemsMap.has(key)) {
-          itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
+        const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
+        if (!mpResp.ok) {
+          const err = await mpResp.json().catch(() => ({}));
+          console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
+          break;
         }
+        const body  = await mpResp.json();
+        const items = body.items || [];
+        const total = body.total ?? null;
+
+        // Log campos disponíveis na primeira chamada para diagnóstico
+        if (primeiraChamada && items.length > 0) {
+          console.log('[MP campos disponíveis]', Object.keys(items[0]).join(', '));
+          console.log('[MP preview total]', total, 'items nesta página:', items.length);
+          console.log('[MP item[0] raw]', JSON.stringify(items[0]));
+          primeiraChamada = false;
+        }
+
+        for (const item of items) {
+          // Ignora cancelados — não devem aparecer como pendentes
+          if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
+
+          const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
+          const key  = mpItemKey(item.vendaId, desc);
+          if (!itemsMap.has(key)) {
+            itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
+          }
+        }
+
+        offset += LIMIT;
+        // Para quando recebemos menos de LIMIT itens (última página)
+        // ou quando o total conhecido já foi superado
+        if (items.length < LIMIT || (total !== null && offset >= total)) break;
       }
     }
     const items = [...itemsMap.values()];
