@@ -177,7 +177,7 @@ async function preview(req, res) {
     const chaves = await getApiKeys(clienteId);
     if (!chaves.length) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
 
-    const LIMIT = 1000;
+    const LIMIT = 300;
 
     // Busca em todas as chaves com paginação; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
     const itemsMap = new Map();
@@ -219,6 +219,7 @@ async function preview(req, res) {
         }
 
         offset += LIMIT;
+        // Quebra só quando a API retorna menos que o limite — sinal de última página
         if (items.length < LIMIT) break;
       }
     }
