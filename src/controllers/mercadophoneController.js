@@ -400,32 +400,43 @@ async function osPreview(req, res) {
     const LIMIT = 300;
     const itemsMap = new Map();
 
+    // Mesma estratégia de dupla consulta usada em preview():
+    // OS do último dia podem estar registradas no sistema com data do dia seguinte.
+    function buildOsQueries() {
+      const queries = [];
+      queries.push({ dataFinalizacaoInicial: dataInicio, dataFinalizacaoFinal: dataFim });
+      if (dataFim) {
+        const [fy, fm, fd] = dataFim.split('-').map(Number);
+        const nextDay = new Date(fy, fm - 1, fd + 1).toISOString().slice(0, 10);
+        queries.push({ dataFinalizacaoInicial: dataFim, dataFinalizacaoFinal: nextDay });
+      }
+      return queries;
+    }
+
     for (const chave of chaves) {
-      let offset = 0;
-      while (true) {
-        const params = new URLSearchParams({ limit: LIMIT, direction: 'desc', offset });
-        if (dataInicio) params.append('dataFinalizacaoInicial', dataInicio);
-        if (dataFim)    params.append('dataFinalizacaoFinal',   dataFim);
+      for (const { dataFinalizacaoInicial, dataFinalizacaoFinal } of buildOsQueries()) {
+        const params = new URLSearchParams({ limit: LIMIT });
+        if (dataFinalizacaoInicial) params.append('dataFinalizacaoInicial', dataFinalizacaoInicial);
+        if (dataFinalizacaoFinal)   params.append('dataFinalizacaoFinal',   dataFinalizacaoFinal);
 
         const mpResp = await mpFetch(`${MP_BASE}/service-orders?${params}`, chave.api_key);
         if (!mpResp.ok) {
           const err = await mpResp.json().catch(() => ({}));
           console.error(`[MP osPreview] chave ${chave.id} erro ${mpResp.status}:`, JSON.stringify(err).slice(0, 200));
-          break;
+          continue;
         }
         const body = await mpResp.json();
         const items = body.items || body.data || [];
-        const total = body.total || 0;
 
         for (const item of items) {
           const statusRaw = (item.situacaoDescricao || '').toLowerCase();
           if (!STATUS_IMPORTAVEIS.has(statusRaw)) continue;
+          // Descarta OS fora do intervalo solicitado
+          const dataFin = (item.dataFinalizacao || '').slice(0, 10);
+          if (dataFim && dataFin && dataFin > dataFim) continue;
           const key = `os:${item.id}`;
           if (!itemsMap.has(key)) itemsMap.set(key, { ...item, _chaveNome: chave.nome, _chaveId: chave.id, _chaveApiKey: chave.api_key });
         }
-
-        offset += LIMIT;
-        if (offset >= total || items.length < LIMIT) break;
       }
     }
     const items = [...itemsMap.values()];
