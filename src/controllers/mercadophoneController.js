@@ -231,13 +231,16 @@ async function preview(req, res) {
       [clienteId]
     );
     const idsImportados = new Set();
+    const idsImportadosObs = new Map();
     existentes.forEach(r => {
       const match = r.obs?.match(/\[MP-([^\] ]+)\]/)?.[1];
       if (!match) return;
       idsImportados.add(match);
-      // Para obs legado (sem slug), reconstrói a chave usando a descrição salva
+      idsImportadosObs.set(match, r.obs);
       if (!match.includes(':') && r.descricao) {
-        idsImportados.add(mpItemKey(match, r.descricao));
+        const k2 = mpItemKey(match, r.descricao);
+        idsImportados.add(k2);
+        idsImportadosObs.set(k2, r.obs);
       }
     });
 
@@ -307,6 +310,7 @@ async function preview(req, res) {
         isUpgrade:         isUpgradeAuto,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         jaImportado:       jaImp,
+        _debugObsMatch:    jaImp ? (idsImportadosObs.get(itemKey) || null) : undefined,
         possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
         chaveNome:         item._chaveNome || '',
       };
