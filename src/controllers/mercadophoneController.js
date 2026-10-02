@@ -177,7 +177,7 @@ async function preview(req, res) {
     const chaves = await getApiKeys(clienteId);
     if (!chaves.length) return res.status(400).json({ erro: 'Chave do Mercado Phone não configurada' });
 
-    const LIMIT = 300;
+    const LIMIT = 1000;
 
     // Busca em todas as chaves com paginação; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
     const itemsMap = new Map();
@@ -219,9 +219,7 @@ async function preview(req, res) {
         }
 
         offset += LIMIT;
-        // Para quando recebemos menos de LIMIT itens (última página)
-        // ou quando o total conhecido já foi superado
-        if (items.length < LIMIT || (total !== null && offset >= total)) break;
+        if (items.length < LIMIT) break;
       }
     }
     const items = [...itemsMap.values()];
@@ -232,18 +230,13 @@ async function preview(req, res) {
       [clienteId]
     );
     const idsImportados = new Set();
-    // mapa de chave → obs original para debug
-    const idsImportadosObs = new Map();
     existentes.forEach(r => {
       const match = r.obs?.match(/\[MP-([^\] ]+)\]/)?.[1];
       if (!match) return;
       idsImportados.add(match);
-      idsImportadosObs.set(match, r.obs);
       // Para obs legado (sem slug), reconstrói a chave usando a descrição salva
       if (!match.includes(':') && r.descricao) {
-        const k2 = mpItemKey(match, r.descricao);
-        idsImportados.add(k2);
-        idsImportadosObs.set(k2, r.obs);
+        idsImportados.add(mpItemKey(match, r.descricao));
       }
     });
 
@@ -292,9 +285,6 @@ async function preview(req, res) {
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = item._mpItemKey || mpItemKey(item.vendaId, descricao);
       const jaImp      = idsImportados.has(itemKey);
-      if (jaImp) {
-        console.log('[MP jaImportado]', itemKey, '→ obs no banco:', idsImportadosObs.get(itemKey));
-      }
 
       return {
         mpVendaId:         item.vendaId,
@@ -316,7 +306,6 @@ async function preview(req, res) {
         isUpgrade:         isUpgradeAuto,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         jaImportado:       jaImp,
-        _debugObsMatch:    jaImp ? (idsImportadosObs.get(itemKey) || null) : undefined,
         possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
         chaveNome:         item._chaveNome || '',
       };
