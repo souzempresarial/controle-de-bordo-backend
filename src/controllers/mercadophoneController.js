@@ -179,37 +179,44 @@ async function preview(req, res) {
 
     const LIMIT = 300;
 
-    // Busca em todas as chaves com paginação; dedup por vendaId:produto (mesma venda pode ter múltiplos produtos)
+    // A API do MP ignora o parâmetro offset quando há filtro de data — retorna sempre os mesmos 300 itens.
+    // Para capturar itens do último dia do mês registrados com atraso no sistema, fazemos duas consultas:
+    //   1. Mês completo: dataInicio → dataFim (captura a maioria dos itens)
+    //   2. Último dia: dataFim → dataFim+1d (captura itens registrados no dia seguinte)
+    // Depois filtramos para só manter itens com dataVenda <= dataFim.
+    function buildQueries() {
+      const queries = [];
+      // Consulta principal do mês
+      queries.push({ dataVendaInicial: dataInicio, dataVendaFinal: dataFim });
+      // Consulta extra do último dia (para itens registrados com atraso)
+      if (dataFim) {
+        const [fy, fm, fd] = dataFim.split('-').map(Number);
+        const nextDay = new Date(fy, fm - 1, fd + 1).toISOString().slice(0, 10);
+        queries.push({ dataVendaInicial: dataFim, dataVendaFinal: nextDay });
+      }
+      return queries;
+    }
+
     const itemsMap = new Map();
     for (const chave of chaves) {
-      let offset = 0;
-      let primeiraChamada = true;
-      while (true) {
-        const params = new URLSearchParams({ limit: LIMIT, direction: 'desc', offset });
-        if (dataInicio) params.append('dataVendaInicial', dataInicio);
-        if (dataFim)    params.append('dataVendaFinal',   dataFim);
+      for (const { dataVendaInicial, dataVendaFinal } of buildQueries()) {
+        const params = new URLSearchParams({ limit: LIMIT });
+        if (dataVendaInicial) params.append('dataVendaInicial', dataVendaInicial);
+        if (dataVendaFinal)   params.append('dataVendaFinal',   dataVendaFinal);
 
         const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
         if (!mpResp.ok) {
           const err = await mpResp.json().catch(() => ({}));
           console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
-          break;
+          continue;
         }
         const body  = await mpResp.json();
         const items = body.items || [];
-        const total = body.total ?? null;
-
-        // Log campos disponíveis na primeira chamada para diagnóstico
-        if (primeiraChamada && items.length > 0) {
-          console.log('[MP campos disponíveis]', Object.keys(items[0]).join(', '));
-          console.log('[MP preview total]', total, 'items nesta página:', items.length);
-          console.log('[MP item[0] raw]', JSON.stringify(items[0]));
-          primeiraChamada = false;
-        }
 
         for (const item of items) {
-          // Ignora cancelados — não devem aparecer como pendentes
           if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
+          // Descarta itens fora do intervalo solicitado (registrados com atraso no próximo mês)
+          if (dataFim && (item.dataVenda || '').slice(0, 10) > dataFim) continue;
 
           const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
           const key  = mpItemKey(item.vendaId, desc);
@@ -217,10 +224,6 @@ async function preview(req, res) {
             itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
           }
         }
-
-        offset += LIMIT;
-        // Quebra só quando a API retorna menos que o limite — sinal de última página
-        if (items.length < LIMIT) break;
       }
     }
     const items = [...itemsMap.values()];
