@@ -3,7 +3,7 @@ const { buildSystemPrompt, dataHoraBrasilia } = require('../prompts/agentPrompt'
 const pool = require('../models/db');
 
 const GEMINI_MODEL  = 'gemini-3.6-flash';
-const MAX_HISTORICO = 10;
+const MAX_HISTORICO = 30;
 
 const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
