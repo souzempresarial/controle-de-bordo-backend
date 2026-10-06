@@ -1,5 +1,6 @@
 const pool = require('../models/db');
-const { processarExtrato, extrairPalavraChave } = require('../services/extratoService');
+const { processarExtrato } = require('../services/extratoService');
+const { normalizarDescricao } = require('../services/sugestaoCategoria');
 
 async function processar(req, res) {
   try {
@@ -22,8 +23,8 @@ async function salvarRegras(req, res) {
 
     for (const t of transacoes) {
       if (!t.descricao || !t.categoria) continue;
-      const palavraChave = extrairPalavraChave(t.descricao);
-      if (palavraChave.length < 4) continue;
+      const palavraChave = normalizarDescricao(t.descricao);
+      if (palavraChave.length < 6) continue;
       await pool.query(
         `INSERT INTO regras_extrato (cliente_id, palavra_chave, categoria, subcategoria)
          VALUES ($1, $2, $3, $4)

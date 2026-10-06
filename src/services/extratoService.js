@@ -1,30 +1,14 @@
 const PDFParser = require('pdf2json');
-const pool = require('../models/db');
-
-const PREFIXOS = [
-  'transferência enviada pelo pix ',
-  'transf enviada pelo pix ',
-  'pix enviado para ',
-  'pix enviado ',
-  'compra no débito ',
-  'compra no crédito ',
-  'pagamento efetuado ',
-  'débito automático ',
-  'ted enviada ',
-  'doc enviado ',
-];
-
-function extrairPalavraChave(descricao) {
-  let d = descricao.trim().toLowerCase();
-  for (const p of PREFIXOS) {
-    if (d.startsWith(p)) return d.slice(p.length).trim();
-  }
-  return d;
-}
+const { listaParaPrompt, validarCategoria } = require('./categorias');
+const { montarIndice, sugerir, exemplosParaPrompt } = require('./sugestaoCategoria');
 
 const GEMINI_MODEL = 'gemini-3.6-flash';
 
-const PROMPT_SISTEMA = `Analise o extrato bancário e extraia apenas as SAÍDAS (débitos, pagamentos, transferências enviadas).
+function montarPrompt(exemplos) {
+  const blocoExemplos = exemplos
+    ? `\n\nComo ESTE cliente costuma categorizar (descrição → categoria). Quando a descrição for parecida com algum exemplo, use a mesma categoria:\n${exemplos}`
+    : '';
+  return `Analise o extrato bancário e extraia apenas as SAÍDAS (débitos, pagamentos, transferências enviadas).
 
 Retorne APENAS este JSON:
 {
@@ -41,21 +25,20 @@ Retorne APENAS este JSON:
 }
 
 Categorias e subcategorias permitidas:
-- Custos Variáveis Diretos → Aparelhos iPhone, Aparelhos Android, iPad, MacBook, Apple Watch, AirPods, Acessórios, Embalagens, Brindes, Assistência Técnica, Outros
-- Fornecedores (Estoque) → Aparelhos, Aparelhos (Upgrade), Pix Fornecedor, Acessórios, Embalagens, Brindes, Assistência Técnica, Boleto, Outro
-- Deduções das Vendas → Taxas de Maquininha, Estornos, Descontos, Outro
-- Custos Variáveis Indiretos → Comissões do Vendedor, Bônus de Indicação, Motoboy, Freelancers, Horas Extras de Colaboradores, Outro
-- Despesas com Ocupação → Luz, Operadora Celular, Internet, Água, Aluguel / Condomínio / IPTU, Segurança, Seguro do Imóvel, Outro
-- Despesas com Pessoal → Vales - Transporte & Refeição, 13º & Férias, INSS & FGTS, Adiantamento, Folha de Pagamento, Pró-Labore / PLR, Outro
-- Despesas Variáveis → Mídia Paga, Tarifas Bancárias, Frete, Garantia, Manutenções / Reparos, Treinamentos, Uber, Deslocamento, Alimentação, Eventos, Veículo, Fatura de Cartão, Outro
-- Softwares / Tecnologias → CRM, Sistema ERP, Outro
-- Serviços Terceirizados → Assessoria Contábil, BPO Terceirização, Emissão de NF-e, Serviços Gerais (Limpeza), Google Meu Negócio, Assistência Técnica, Assessoria de Marketing, Advogado, Consultoria, Outro
-- Impostos → DAS - Simples Nacional, DAS - MEIs, CEF Matriz, Ministério da Fazenda, Outro
-- Dívidas / Empréstimos → Outro
-- Saídas Não-Operacionais → Suprimentos, Obras, Despesas Extras, Decorações, Manutenções em Equipamentos, Patrocínio, Momento Recreativo, Perda de Mercadoria, Outro
-- Investimentos → Equipamentos, Reformas, Computadores, Veículos, Imóveis, Outro
+${listaParaPrompt()}
 
-Regras: valores positivos, datas YYYY-MM-DD, ignore entradas e saldos, use EXATAMENTE os nomes da lista, retorne APENAS o JSON.`;
+Dicas para casos comuns:
+- posto, combustível, gasolina, estacionamento, IPVA, parcela de carro → Despesas Variáveis > Veículo
+- uber, 99, táxi → Despesas Variáveis > Uber
+- tarifa, pacote de serviços, manutenção de conta → Despesas Variáveis > Tarifas Bancárias
+- operadora de celular (Claro, Vivo, Tim, Oi) → Despesas com Ocupação > Operadora Celular
+- energia, Enel, Cemig, Copel → Despesas com Ocupação > Luz
+- DAS, Simples Nacional → Impostos > DAS - Simples Nacional
+- parcela de empréstimo, financiamento → Dívidas / Empréstimos > Parcela de Empréstimo
+- Meta, Facebook Ads, Google Ads, Instagram → Despesas Variáveis > Mídia Paga
+
+Regras: valores positivos, datas YYYY-MM-DD, ignore entradas e saldos, use EXATAMENTE os nomes da lista. Se não tiver segurança da subcategoria, use "Outro" da categoria certa. Retorne APENAS o JSON.${blocoExemplos}`;
+}
 
 const MESES = {
   // PT abrev + full
@@ -161,29 +144,15 @@ function geminiUrl() {
   return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GOOGLE_API_KEY}`;
 }
 
-async function buscarRegras(clienteId) {
-  if (!clienteId) return [];
-  try {
-    const { rows } = await pool.query(
-      'SELECT palavra_chave, categoria, subcategoria FROM regras_extrato WHERE cliente_id = $1',
-      [clienteId]
-    );
-    return rows;
-  } catch (err) {
-    console.error('[Extrato] Erro ao buscar regras:', err.message);
-    return [];
-  }
-}
-
-function aplicarRegras(transacoes, regras) {
-  if (!regras.length) return transacoes;
+// Histórico do cliente vence a IA; o que a IA sugerir passa pela lista oficial
+function categorizar(transacoes, indice) {
   return transacoes.map(t => {
-    const descNorm = extrairPalavraChave(t.descricao || '');
-    const regra = regras.find(r =>
-      descNorm.includes(r.palavra_chave)
-    );
-    if (regra) return { ...t, categoria_sugerida: regra.categoria, subcategoria_sugerida: regra.subcategoria || null };
-    return t;
+    const doHistorico = sugerir(t.descricao, indice);
+    if (doHistorico) {
+      return { ...t, categoria_sugerida: doHistorico.categoria, subcategoria_sugerida: doHistorico.subcategoria, origem_sugestao: 'historico' };
+    }
+    const v = validarCategoria(t.categoria_sugerida, t.subcategoria_sugerida);
+    return { ...t, categoria_sugerida: v.categoria, subcategoria_sugerida: v.subcategoria, origem_sugestao: v.categoria ? 'ia' : null };
   });
 }
 
@@ -192,6 +161,11 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
 
   if (mime === 'application/pdf' || mime.startsWith('image/')) {
     console.log(`[Extrato] arquivo: ${file.originalname}, tamanho: ${file.size} bytes`);
+    const indice = await montarIndice(clienteId).catch(err => {
+      console.error('[Extrato] Erro ao montar histórico:', err.message);
+      return new Map();
+    });
+    const PROMPT_SISTEMA = montarPrompt(exemplosParaPrompt(indice));
 
     let body;
     if (mime === 'application/pdf') {
@@ -268,11 +242,13 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
       });
     }
 
-    const regras = await buscarRegras(clienteId);
-    return aplicarRegras(transacoes, regras);
+    const resultado = categorizar(transacoes, indice);
+    const nHist = resultado.filter(t => t.origem_sugestao === 'historico').length;
+    console.log(`[Extrato] ${resultado.length} transações — ${nHist} pelo histórico, ${resultado.length - nHist} pela IA`);
+    return resultado;
   }
 
   throw new Error('Formato não suportado. Envie PDF ou imagem (JPG, PNG).');
 }
 
-module.exports = { processarExtrato, extrairPalavraChave };
+module.exports = { processarExtrato };
