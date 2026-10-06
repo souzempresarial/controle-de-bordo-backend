@@ -56,8 +56,8 @@ async function salvarHistorico(clienteId, historico, mensagem, resposta) {
   try {
     const atualizado = [
       ...historico,
-      { role: 'user',      content: mensagem },
-      { role: 'assistant', content: resposta  },
+      { role: 'user',      content: mensagem, source: 'whatsapp' },
+      { role: 'assistant', content: resposta, source: 'whatsapp' },
     ].slice(-CHAT_MAX);
     await redis.set(`chat:${clienteId}`, atualizado, { ex: CHAT_TTL });
   } catch (e) {
@@ -120,7 +120,7 @@ async function webhook(req, res) {
 
     // Pipeline do agente (igual à dashboard)
     const historico = await carregarHistorico(clienteId);
-    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome);
+    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'whatsapp');
 
     await salvarHistorico(clienteId, historico, mensagem.trim(), resultado.resposta);
     await sender.enviarTexto(telefone, resultado.resposta);

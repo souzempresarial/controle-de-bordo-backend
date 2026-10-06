@@ -23,14 +23,14 @@ async function chat(req, res) {
       console.warn('[Agent] Redis get historico error:', e.message);
     }
 
-    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome);
+    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'dashboard');
 
     // Salva histórico atualizado no Redis
     try {
       const atualizado = [
         ...historico,
-        { role: 'user',      content: mensagem.trim() },
-        { role: 'assistant', content: resultado.resposta },
+        { role: 'user',      content: mensagem.trim(),    source: 'dashboard' },
+        { role: 'assistant', content: resultado.resposta, source: 'dashboard' },
       ].slice(-CHAT_MAX);
       await redis.set(chatKey, atualizado, { ex: CHAT_TTL });
     } catch (e) {

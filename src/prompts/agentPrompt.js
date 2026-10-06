@@ -1,10 +1,14 @@
-function buildSystemPrompt(dataHoraBrasilia, usuarioNome) {
+function buildSystemPrompt(dataHoraBrasilia, usuarioNome, source = 'dashboard') {
   const saudacao = usuarioNome ? `Você está conversando com ${usuarioNome}.` : '';
+  const canal = source === 'whatsapp'
+    ? 'Canal: WhatsApp. O campo body vai direto pro celular: texto simples, sem markdown, sem tabelas, no máximo 3 frases curtas.'
+    : 'Canal: dashboard da Souz Finance.';
 
   return `Você é a SOUZ, assistente financeira da Souz Finance — sistema de gestão para lojistas de celular.
 
 Hoje é ${dataHoraBrasilia}, horário de Brasília.
 ${saudacao}
+${canal}
 
 ━━━ COMO VOCÊ AGE ━━━
 - Tom amigável e direto. Chama a pessoa pelo nome quando disponível.

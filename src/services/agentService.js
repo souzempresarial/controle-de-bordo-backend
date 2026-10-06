@@ -54,14 +54,9 @@ function montarHistorico(historico) {
 
 // ---------- Gemini via @google/genai SDK ----------
 
-async function callGemini(mensagem, historico, clienteNome, usuarioNome) {
-  const promptBase    = buildSystemPrompt(dataHoraBrasilia(), usuarioNome);
-  const promptComNome = clienteNome
-    ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
-    : promptBase;
-
+async function callGemini(mensagem, historico, systemPrompt) {
   const contents = [
-    { role: 'user',  parts: [{ text: promptComNome }] },
+    { role: 'user',  parts: [{ text: systemPrompt }] },
     { role: 'model', parts: [{ text: 'Entendido. Responderei sempre em JSON conforme o formato especificado.' }] },
     ...montarHistorico(historico),
     { role: 'user',  parts: [{ text: mensagem }] },
@@ -86,14 +81,9 @@ async function callGemini(mensagem, historico, clienteNome, usuarioNome) {
 
 // ---------- DeepSeek fallback ----------
 
-async function callDeepSeek(mensagem, historico, clienteNome, usuarioNome) {
-  const promptBase    = buildSystemPrompt(dataHoraBrasilia(), usuarioNome);
-  const systemContent = clienteNome
-    ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
-    : promptBase;
-
+async function callDeepSeek(mensagem, historico, systemPrompt) {
   const messages = [
-    { role: 'system', content: systemContent },
+    { role: 'system', content: systemPrompt },
     ...historico.slice(-MAX_HISTORICO).map(h => ({
       role: h.role === 'assistant' ? 'assistant' : 'user',
       content: h.role === 'assistant'
@@ -127,14 +117,19 @@ async function callDeepSeek(mensagem, historico, clienteNome, usuarioNome) {
 
 // ---------- orquestrador com fallback ----------
 
-async function callLLM(mensagem, historico, clienteNome, usuarioNome) {
+async function callLLM(mensagem, historico, clienteNome, usuarioNome, source) {
+  const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source);
+  const systemPrompt = clienteNome
+    ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
+    : promptBase;
+
   try {
-    return await callGemini(mensagem, historico, clienteNome, usuarioNome);
+    return await callGemini(mensagem, historico, systemPrompt);
   } catch (err) {
     console.warn('[Agent] Gemini falhou:', err.message, '— tentando DeepSeek...');
     if (process.env.DEEPSEEK_API_KEY) {
       try {
-        return await callDeepSeek(mensagem, historico, clienteNome, usuarioNome);
+        return await callDeepSeek(mensagem, historico, systemPrompt);
       } catch (err2) {
         console.warn('[Agent] DeepSeek também falhou:', err2.message);
       }
@@ -253,10 +248,10 @@ function formatarResultadoConsulta(rows, periodo, tipo) {
 
 // ---------- ponto de entrada ----------
 
-async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome) {
-  console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome);
+async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard') {
+  console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome, '| source:', source);
 
-  const textoLLM = await callLLM(mensagem, historico, clienteNome, usuarioNome);
+  const textoLLM = await callLLM(mensagem, historico, clienteNome, usuarioNome, source);
 
   const parsed = parseResposta(textoLLM);
   const { intent_type, body, data: dados = {} } = parsed;
