@@ -37,7 +37,6 @@ module.exports.gerarAnalytics = async (event) => {
     }
   }
 
-  await pool.end();
   const msg = `Concluído — ${ok} resumos gerados, ${erros} erros`;
   console.log('[Analytics]', msg);
   return { statusCode: 200, body: msg };

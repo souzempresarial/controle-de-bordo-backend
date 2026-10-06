@@ -2,8 +2,8 @@ const pool    = require('../models/db');
 const { GoogleGenAI } = require('@google/genai');
 
 const genAI       = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
-const EMBED_MODEL = 'text-embedding-004'; // 768 dims
-const CHAT_MODEL  = 'gemini-2.0-flash';
+const EMBED_MODEL = 'gemini-embedding-001';
+const CHAT_MODEL  = 'gemini-3.8-flash';
 
 // ---------- helpers ----------
 
@@ -80,13 +80,17 @@ Escreva 2-3 frases resumindo o desempenho financeiro. Mencione: faturamento, pri
 // ---------- embedding ----------
 
 async function gerarEmbedding(texto) {
-  const result = await genAI.models.embedContent({
-    model:    EMBED_MODEL,
-    contents: texto,
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${process.env.GOOGLE_API_KEY}`;
+  const resp = await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ content: { parts: [{ text: texto }] }, outputDimensionality: 768 }),
   });
-  const values = result.embeddings?.[0]?.values;
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error?.message || 'Erro embedding');
+  const values = data.embedding?.values;
   if (!values) throw new Error('Embedding vazio');
-  return values; // number[]
+  return values;
 }
 
 // ---------- API pública ----------
