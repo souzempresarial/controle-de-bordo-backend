@@ -4,6 +4,8 @@ const { GoogleGenAI } = require('@google/genai');
 const genAI       = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 const EMBED_MODEL = 'gemini-embedding-001';
 const CHAT_MODEL  = 'gemini-3.8-flash';
+const RESPOSTA_MODEL      = 'gemini-3.6-flash';
+const RESPOSTA_TIMEOUT_MS = 15000;
 
 // ---------- helpers ----------
 
@@ -155,14 +157,22 @@ Pergunta: ${pergunta}
 Resumos disponíveis:
 ${contexto}`;
 
-  const result = await genAI.models.generateContent({
-    model:    CHAT_MODEL,
+  // Roda dentro do chat: API Gateway corta em 29s e o agente já gastou parte disso
+  const geracao = genAI.models.generateContent({
+    model:    RESPOSTA_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config:   { temperature: 0.2 },
+    config:   { temperature: 0.2, thinkingConfig: { thinkingLevel: 'low' } },
   });
+  const limite = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout analytics')), RESPOSTA_TIMEOUT_MS));
 
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? result.text;
-  return (text || '').trim();
+  try {
+    const result = await Promise.race([geracao, limite]);
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? result.text;
+    return (text || '').trim();
+  } catch (err) {
+    console.warn('[Analytics] Falha ao responder:', err.message);
+    return 'A análise demorou mais que o normal. Tente perguntar de novo em alguns segundos.';
+  }
 }
 
 module.exports = { gerarResumoMensal, buscarAnalytics, responderComContexto };
