@@ -19,17 +19,77 @@ async function getApiKeys(clienteId) {
   return rows;
 }
 
-function mapPagamento(canal) {
-  if (!canal) return '';
-  const c = canal.toLowerCase();
-  if (c.includes('pix'))                              return 'Pix';
-  if (c.includes('crédito') || c.includes('credito')) return 'Crédito';
-  if (c.includes('débito')  || c.includes('debito'))  return 'Débito';
-  if (c.includes('dinheiro') || c.includes('espécie') || c.includes('especie')) return 'Dinheiro';
-  if (c.includes('boleto'))                           return 'Boleto';
-  if (c.includes('transferência') || c.includes('ted') || c.includes('doc'))    return 'Transferência';
-  // canal pode ser "Aparelho", "Upgrade" etc — nesses casos retorna vazio para usuário definir
+function normalizar(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+function ehPagamentoAparelho(p) {
+  return normalizar(p.formaPagamentoDescricao).includes('aparelho');
+}
+
+// Nomes variam por loja ("PIX - SICOOB", "CREDITO STONE", "STONE"...).
+// Maquininha sem crédito/débito no nome só é Crédito quando parcelado; senão fica pro lojista escolher.
+function mapFormaVenda(descricao, parcela) {
+  const f = normalizar(descricao);
+  if (f.includes('pix'))                                                  return 'Pix';
+  if (f.includes('debito em conta') || f.includes('transferencia') || /\bted\b/.test(f)) return 'Transferência';
+  if (f.includes('credito'))                                              return 'Crédito';
+  if (f.includes('debito'))                                               return 'Débito';
+  if (f.includes('dinheiro') || f.includes('especie'))                    return 'Dinheiro';
+  if (f.includes('boleto'))                                               return 'Boleto';
+  if (parseInt(parcela) > 1)                                              return 'Crédito';
   return '';
+}
+
+function fmtBRL(v) {
+  return `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function resumirPagamentos(pagamentos) {
+  return pagamentos.map(p => {
+    const nome = (p.formaPagamentoDescricao || '').trim().replace(/\s+/g, ' ');
+    const extra = ehPagamentoAparelho(p) && p.detalhes ? ` (${p.detalhes.trim().replace(/\s+/g, ' ')})` : '';
+    return `${nome} ${fmtBRL(p.valor)}${extra}`;
+  }).join(' · ');
+}
+
+const DETALHE_TTL      = 60 * 60 * 24 * 90; // venda fechada não muda
+const DETALHE_LOTE     = 10;
+const DETALHE_ORCAMENTO_MS = 20000;         // API Gateway corta em 29s
+
+// Retorna Map vendaId → pagamentos[]. Vendas que não couberem no orçamento de tempo ficam de fora.
+async function buscarPagamentosVendas(vendas, inicio) {
+  const resultado = new Map();
+  if (!vendas.length) return resultado;
+
+  const chaveCache = v => `mp:venda:${v.chaveId}:${v.vendaId}`;
+  try {
+    const cached = await redis.mget(...vendas.map(chaveCache));
+    cached.forEach((c, i) => { if (Array.isArray(c)) resultado.set(vendas[i].vendaId, c); });
+  } catch (e) {
+    console.warn('[MP detalhes] Redis mget error:', e.message);
+  }
+
+  const faltando = vendas.filter(v => !resultado.has(v.vendaId));
+  for (let i = 0; i < faltando.length; i += DETALHE_LOTE) {
+    if (Date.now() - inicio > DETALHE_ORCAMENTO_MS) {
+      console.warn(`[MP detalhes] Orçamento de tempo esgotado — ${faltando.length - i} vendas sem detalhe`);
+      break;
+    }
+    const lote = faltando.slice(i, i + DETALHE_LOTE);
+    await Promise.all(lote.map(async v => {
+      try {
+        const r = await mpFetch(`${MP_BASE}/sales/${v.vendaId}`, v.apiKey, 10000);
+        if (!r.ok) return;
+        const pagamentos = (await r.json()).pagamentos || [];
+        resultado.set(v.vendaId, pagamentos);
+        await redis.set(chaveCache(v), pagamentos, { ex: DETALHE_TTL }).catch(() => {});
+      } catch (e) {
+        console.warn(`[MP detalhes] venda ${v.vendaId}:`, e.message);
+      }
+    }));
+  }
+  return resultado;
 }
 
 function mapAcessorioSub(str) {
@@ -172,6 +232,7 @@ async function salvarChave(req, res) {
 }
 
 async function preview(req, res) {
+  const inicio = Date.now();
   try {
     const { clienteId } = req.params;
     const { dataInicio, dataFim } = req.body;
@@ -235,7 +296,7 @@ async function preview(req, res) {
             const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
             const key  = mpItemKey(item.vendaId, desc);
             if (!itemsMap.has(key)) {
-              itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
+              itemsMap.set(key, { ...item, _chaveNome: chave.nome, _chaveId: chave.id, _mpItemKey: key });
             }
           }
         }
@@ -275,6 +336,33 @@ async function preview(req, res) {
       manuais.map(r => `${r.data.slice(0, 10)}-${parseFloat(r.valor).toFixed(2)}`)
     );
 
+    function valorFinalItem(item) {
+      const qty      = parseInt(item.quantidade || 1);
+      // valorUnitario × qty = faturamento real (coincide com relatório do MP)
+      const valUnit  = parseFloat(item.valorUnitario ?? NaN);
+      const bruto    = !isNaN(valUnit) ? valUnit * qty : parseFloat(item.valorCliente || item.valorTotal || 0);
+      return Math.max(0, bruto - parseFloat(item.desconto || 0));
+    }
+    const keyDoItem = item => item._mpItemKey || mpItemKey(item.vendaId, item.aparelhoDescricao || item.tipoProdutoDescricao || '');
+
+    // Pagamentos são da venda, não do item: o upgrade fica só no item de maior valor, pra não contar duas vezes
+    const itemPrincipal = new Map();
+    for (const item of items) {
+      const atual = itemPrincipal.get(item.vendaId);
+      if (!atual || valorFinalItem(item) > valorFinalItem(atual)) itemPrincipal.set(item.vendaId, item);
+    }
+
+    const chavePorId   = new Map(chaves.map(c => [c.id, c]));
+    const chavePorNome = new Map(chaves.map(c => [c.nome, c]));
+    const vendasPendentes = new Map();
+    for (const item of items) {
+      if (idsImportados.has(keyDoItem(item)) || vendasPendentes.has(item.vendaId)) continue;
+      const chave = chavePorId.get(item._chaveId) || chavePorNome.get(item._chaveNome) || chaves[0];
+      vendasPendentes.set(item.vendaId, { vendaId: item.vendaId, chaveId: chave.id, apiKey: chave.api_key });
+    }
+    const pagamentosPorVenda = await buscarPagamentosVendas([...vendasPendentes.values()], inicio);
+    console.log(`[MP preview] ${vendasPendentes.size} vendas pendentes, ${pagamentosPorVenda.size} com pagamentos (${Date.now() - inicio}ms)`);
+
     const transacoes = items.map(item => {
       const { categoria, subcategoria } = mapCategoria(
         item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao,
@@ -283,31 +371,20 @@ async function preview(req, res) {
 
       const descontoVal   = parseFloat(item.desconto || 0);
       const qty           = parseInt(item.quantidade || 1);
-      // valorUnitario × qty = faturamento real (coincide com relatório do MP)
-      // Fallback para valorCliente/valorTotal caso valorUnitario não exista na resposta
-      const valUnit       = parseFloat(item.valorUnitario ?? NaN);
-      const valorBruto    = !isNaN(valUnit)
-        ? valUnit * qty
-        : parseFloat(item.valorCliente || item.valorTotal || 0);
-      const valorFinal    = Math.max(0, valorBruto - descontoVal);
+      const valorFinal    = valorFinalItem(item);
       const chaveMP       = `${(item.dataVenda || '').slice(0, 10)}-${valorFinal.toFixed(2)}`;
 
-      // Pagamentos — detecta aparelho (trade-in) e forma de pagamento em dinheiro
-      const pagamentos    = Array.isArray(item.pagamentos) ? item.pagamentos : [];
-      const pagAparel     = pagamentos.find(p =>
-        (p.sigla || p.tipo || '').toLowerCase().includes('aparelho') ||
-        (p.siglaMeioPagamento || '').toLowerCase().includes('aparelho')
-      );
-      const pagCash       = pagamentos.find(p => p !== pagAparel);
-      const pagCashStr    = mapPagamento(pagCash?.siglaMeioPagamento || pagCash?.sigla || pagCash?.tipo || '');
-      const valorAparel   = pagAparel ? parseFloat(pagAparel.valor || 0) : 0;
-
-      // Upgrade: pagamento "Aparelho" na venda OU tipoVendaDescricao indica upgrade
-      const isUpgradeAuto = valorAparel > 0 ||
-                            (item.tipoVendaDescricao || '').toLowerCase().includes('upgrade');
+      const pagamentos    = pagamentosPorVenda.get(item.vendaId) || [];
+      const ehPrincipal   = itemPrincipal.get(item.vendaId) === item;
+      const pagDinheiro   = pagamentos.filter(p => !ehPagamentoAparelho(p));
+      const pagMaior      = pagDinheiro.reduce((m, p) => (!m || parseFloat(p.valor) > parseFloat(m.valor) ? p : m), null);
+      const pagamentoStr  = pagMaior ? mapFormaVenda(pagMaior.formaPagamentoDescricao, pagMaior.parcela) : '';
+      const valorAparel   = ehPrincipal
+        ? pagamentos.filter(ehPagamentoAparelho).reduce((s, p) => s + parseFloat(p.valor || 0), 0)
+        : 0;
 
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
-      const itemKey    = item._mpItemKey || mpItemKey(item.vendaId, descricao);
+      const itemKey    = keyDoItem(item);
       const jaImp      = idsImportados.has(itemKey);
 
       return {
@@ -320,15 +397,16 @@ async function preview(req, res) {
         categoria,
         subcategoria,
         descricao,
-        pagamento:         pagCashStr,
+        pagamento:         pagamentoStr,
         status:            (item.statusVenda || '').toLowerCase() === 'cancelado' ? 'Cancelado' : 'Confirmado',
         vendedorNome:      item.vendedorNome        || '',
         clienteNome:       item.clienteNome         || '',
         tipoVendaOriginal: item.tipoVendaDescricao  || '',
         canalOriginal:     item.canalVendaDescricao || '',
         desconto:          descontoVal > 0 ? descontoVal : null,
-        isUpgrade:         isUpgradeAuto,
+        isUpgrade:         valorAparel > 0,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
+        resumoPagamentos:  ehPrincipal && pagamentos.length ? resumirPagamentos(pagamentos) : '',
         jaImportado:       jaImp,
         possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
         chaveNome:         item._chaveNome || '',
@@ -357,7 +435,7 @@ async function importar(req, res) {
       const isDowngrade = upgradeVal != null && upgradeVal > t.valor;
       const grupoId     = (t.cmvValor > 0 || isDowngrade) ? `g${Date.now()}${t.mpVendaId}` : null;
       const mpKey       = t.mpItemKey || String(t.mpVendaId);
-      const obs         = `[MP-${mpKey}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}`;
+      const obs         = `[MP-${mpKey}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}${t.resumoPagamentos ? ' | Pagamentos: ' + t.resumoPagamentos : ''}`;
 
       const deducaoVal    = t.deducao && parseFloat(t.deducao) > 0 ? parseFloat(t.deducao) : null;
       const valorRecebido = deducaoVal !== null ? t.valor - deducaoVal : null;
