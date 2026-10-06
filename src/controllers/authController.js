@@ -343,10 +343,11 @@ async function criarUsuario(req, res) {
   if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { email, senha, clienteId, nome, papel: papelBody, permissoes } = req.body;
-    if (!email || !senha || !clienteId) return res.status(400).json({ erro: 'Email, senha e clienteId obrigatórios' });
-
-    const papelFinal = papelBody === 'funcionario' ? 'funcionario' : 'cliente';
-    const permFinal  = papelFinal === 'funcionario' && Array.isArray(permissoes) ? JSON.stringify(permissoes) : null;
+    if (!email || !senha) return res.status(400).json({ erro: 'Email e senha obrigatórios' });
+  const PAPEIS_VALIDOS = ['cliente', 'funcionario', 'admin'];
+  const papelFinal = PAPEIS_VALIDOS.includes(papelBody) ? papelBody : 'cliente';
+    if (papelFinal === 'funcionario' && !clienteId) return res.status(400).json({ erro: 'Selecione o cliente do funcionário' });
+  const permFinal  = papelFinal === 'funcionario' && Array.isArray(permissoes) ? JSON.stringify(permissoes) : null;
 
     const hash = await bcrypt.hash(senha, 10);
     const result = await pool.query(
@@ -486,7 +487,7 @@ async function listarLogAcessos(req, res) {
 async function minhaInfo(req, res) {
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, papel, cliente_id, nome, email_verificado, criado_em FROM usuarios WHERE id = $1',
+      'SELECT id, email, papel, cliente_id, nome, email_verificado, telefone, criado_em FROM usuarios WHERE id = $1',
       [req.usuario.id]
     );
     res.json(rows[0] || {});
@@ -498,7 +499,7 @@ async function minhaInfo(req, res) {
 
 async function editarPerfil(req, res) {
   try {
-    const { nome, email, senhaAtual, novaSenha } = req.body;
+    const { nome, email, telefone, senhaAtual, novaSenha } = req.body;
     const { rows } = await pool.query('SELECT * FROM usuarios WHERE id = $1', [req.usuario.id]);
     const usuario = rows[0];
     if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado' });
@@ -506,6 +507,11 @@ async function editarPerfil(req, res) {
     const sets = []; const vals = []; let idx = 1;
 
     if (nome !== undefined) { sets.push(`nome = $${idx++}`); vals.push(nome); }
+
+    if (telefone !== undefined) {
+      const tel = telefone ? telefone.replace(/\D/g, '') : null;
+      sets.push(`telefone = $${idx++}`); vals.push(tel || null);
+    }
 
     if (email && email.toLowerCase() !== usuario.email) {
       if (!email.includes('@') || !email.split('@')[1]?.includes('.'))
@@ -529,7 +535,10 @@ async function editarPerfil(req, res) {
     await pool.query(`UPDATE usuarios SET ${sets.join(', ')} WHERE id = $${idx}`, vals);
     res.json({ mensagem: 'Perfil atualizado com sucesso' });
   } catch (err) {
-    if (err.code === '23505') return res.status(400).json({ erro: 'E-mail já cadastrado' });
+    if (err.code === '23505') {
+      const msg = err.constraint?.includes('telefone') ? 'Número de WhatsApp já cadastrado' : 'E-mail já cadastrado';
+      return res.status(400).json({ erro: msg });
+    }
     console.error('[auth]', err.message);
     res.status(500).json({ erro: 'Erro interno' });
   }

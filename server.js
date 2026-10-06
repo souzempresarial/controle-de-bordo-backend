@@ -65,8 +65,9 @@ app.use('/auth/reenviar-verificacao',  resetLimiter);
 app.use('/auth/registrar-admin',       resetLimiter);
 
 // Rotas públicas
-app.use('/auth',  require('./src/routes/auth'));
-app.use('/admin', require('./src/routes/admin'));
+app.use('/auth',      require('./src/routes/auth'));
+app.use('/admin',     require('./src/routes/admin'));
+app.use('/whatsapp',  require('./src/routes/whatsapp'));
 
 // Rotas protegidas
 app.use('/clientes',                              autenticar, require('./src/routes/clientes'));
