@@ -1,6 +1,8 @@
-﻿const pool = require('../models/db');
+﻿const pool  = require('../models/db');
+const redis = require('../services/redis');
 
-const MP_BASE = 'https://platform.mercadophone.tech/api/v1';
+const MP_BASE  = 'https://platform.mercadophone.tech/api/v1';
+const CACHE_TTL = 300; // 5 minutos
 
 function mpFetch(url, apiKey, timeoutMs = 30000) {
   const ctrl = new AbortController();
@@ -197,36 +199,54 @@ async function preview(req, res) {
       return queries;
     }
 
-    const itemsMap = new Map();
-    for (const chave of chaves) {
-      for (const { dataVendaInicial, dataVendaFinal } of buildQueries()) {
-        const params = new URLSearchParams({ limit: LIMIT });
-        if (dataVendaInicial) params.append('dataVendaInicial', dataVendaInicial);
-        if (dataVendaFinal)   params.append('dataVendaFinal',   dataVendaFinal);
+    const cacheKey = `mp:preview:${clienteId}:${dataInicio}:${dataFim}`;
+    let items;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        console.log('[MP preview] Cache hit:', cacheKey);
+        items = cached;
+      }
+    } catch (e) {
+      console.warn('[MP preview] Redis get error:', e.message);
+    }
 
-        const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
-        if (!mpResp.ok) {
-          const err = await mpResp.json().catch(() => ({}));
-          console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
-          continue;
-        }
-        const body  = await mpResp.json();
-        const items = body.items || [];
+    if (!items) {
+      const itemsMap = new Map();
+      for (const chave of chaves) {
+        for (const { dataVendaInicial, dataVendaFinal } of buildQueries()) {
+          const params = new URLSearchParams({ limit: LIMIT });
+          if (dataVendaInicial) params.append('dataVendaInicial', dataVendaInicial);
+          if (dataVendaFinal)   params.append('dataVendaFinal',   dataVendaFinal);
 
-        for (const item of items) {
-          if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
-          // Descarta itens fora do intervalo solicitado (registrados com atraso no próximo mês)
-          if (dataFim && (item.dataVenda || '').slice(0, 10) > dataFim) continue;
+          const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
+          if (!mpResp.ok) {
+            const err = await mpResp.json().catch(() => ({}));
+            console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
+            continue;
+          }
+          const body  = await mpResp.json();
+          const rawItems = body.items || [];
 
-          const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
-          const key  = mpItemKey(item.vendaId, desc);
-          if (!itemsMap.has(key)) {
-            itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
+          for (const item of rawItems) {
+            if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
+            if (dataFim && (item.dataVenda || '').slice(0, 10) > dataFim) continue;
+
+            const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
+            const key  = mpItemKey(item.vendaId, desc);
+            if (!itemsMap.has(key)) {
+              itemsMap.set(key, { ...item, _chaveNome: chave.nome, _mpItemKey: key });
+            }
           }
         }
       }
+      items = [...itemsMap.values()];
+      try {
+        await redis.set(cacheKey, items, { ex: CACHE_TTL });
+      } catch (e) {
+        console.warn('[MP preview] Redis set error:', e.message);
+      }
     }
-    const items = [...itemsMap.values()];
 
     // Chaves já importadas — suporta formato novo "vendaId:slug" e legado "vendaId"
     const { rows: existentes } = await pool.query(
@@ -295,7 +315,7 @@ async function preview(req, res) {
         mpItemKey:         itemKey,
         data:              (item.dataVenda || '').slice(0, 10),
         valor:             valorFinal,
-        cmvValor:          parseFloat(item.valorCusto || 0) * qty,
+        cmvValor:          parseFloat(item.valorCusto || 0),
         quantidade:        qty,
         categoria,
         subcategoria,
@@ -413,33 +433,51 @@ async function osPreview(req, res) {
       return queries;
     }
 
-    for (const chave of chaves) {
-      for (const { dataFinalizacaoInicial, dataFinalizacaoFinal } of buildOsQueries()) {
-        const params = new URLSearchParams({ limit: LIMIT });
-        if (dataFinalizacaoInicial) params.append('dataFinalizacaoInicial', dataFinalizacaoInicial);
-        if (dataFinalizacaoFinal)   params.append('dataFinalizacaoFinal',   dataFinalizacaoFinal);
+    const osCacheKey = `mp:os:${clienteId}:${dataInicio}:${dataFim}`;
+    let items;
+    try {
+      const cached = await redis.get(osCacheKey);
+      if (cached) {
+        console.log('[MP osPreview] Cache hit:', osCacheKey);
+        items = cached;
+      }
+    } catch (e) {
+      console.warn('[MP osPreview] Redis get error:', e.message);
+    }
 
-        const mpResp = await mpFetch(`${MP_BASE}/service-orders?${params}`, chave.api_key);
-        if (!mpResp.ok) {
-          const err = await mpResp.json().catch(() => ({}));
-          console.error(`[MP osPreview] chave ${chave.id} erro ${mpResp.status}:`, JSON.stringify(err).slice(0, 200));
-          continue;
-        }
-        const body = await mpResp.json();
-        const items = body.items || body.data || [];
+    if (!items) {
+      for (const chave of chaves) {
+        for (const { dataFinalizacaoInicial, dataFinalizacaoFinal } of buildOsQueries()) {
+          const params = new URLSearchParams({ limit: LIMIT });
+          if (dataFinalizacaoInicial) params.append('dataFinalizacaoInicial', dataFinalizacaoInicial);
+          if (dataFinalizacaoFinal)   params.append('dataFinalizacaoFinal',   dataFinalizacaoFinal);
 
-        for (const item of items) {
-          const statusRaw = (item.situacaoDescricao || '').toLowerCase();
-          if (!STATUS_IMPORTAVEIS.has(statusRaw)) continue;
-          // Descarta OS fora do intervalo solicitado
-          const dataFin = (item.dataFinalizacao || '').slice(0, 10);
-          if (dataFim && dataFin && dataFin > dataFim) continue;
-          const key = `os:${item.id}`;
-          if (!itemsMap.has(key)) itemsMap.set(key, { ...item, _chaveNome: chave.nome, _chaveId: chave.id, _chaveApiKey: chave.api_key });
+          const mpResp = await mpFetch(`${MP_BASE}/service-orders?${params}`, chave.api_key);
+          if (!mpResp.ok) {
+            const err = await mpResp.json().catch(() => ({}));
+            console.error(`[MP osPreview] chave ${chave.id} erro ${mpResp.status}:`, JSON.stringify(err).slice(0, 200));
+            continue;
+          }
+          const body = await mpResp.json();
+          const rawItems = body.items || body.data || [];
+
+          for (const item of rawItems) {
+            const statusRaw = (item.situacaoDescricao || '').toLowerCase();
+            if (!STATUS_IMPORTAVEIS.has(statusRaw)) continue;
+            const dataFin = (item.dataFinalizacao || '').slice(0, 10);
+            if (dataFim && dataFin && dataFin > dataFim) continue;
+            const key = `os:${item.id}`;
+            if (!itemsMap.has(key)) itemsMap.set(key, { ...item, _chaveNome: chave.nome, _chaveId: chave.id, _chaveApiKey: chave.api_key });
+          }
         }
       }
+      items = [...itemsMap.values()];
+      try {
+        await redis.set(osCacheKey, items, { ex: CACHE_TTL });
+      } catch (e) {
+        console.warn('[MP osPreview] Redis set error:', e.message);
+      }
     }
-    const items = [...itemsMap.values()];
 
     const { rows: existentes } = await pool.query(
       `SELECT obs FROM lancamentos WHERE cliente_id = $1 AND obs LIKE '[OS-%' AND tipo = 'Entrada'`,
