@@ -313,7 +313,7 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
       };
     }
 
-    const resposta = await responderComContexto(pergunta, resumos);
+    const resposta = await responderComContexto(pergunta, resumos, source);
     console.log('[Agent][5] Resposta analytics:', resposta.slice(0, 200));
     return { resposta, acao: null };
   }

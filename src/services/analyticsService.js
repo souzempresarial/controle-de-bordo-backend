@@ -133,12 +133,22 @@ async function buscarAnalytics(clienteId, pergunta) {
   return rows; // [{ periodo, resumo, similaridade }]
 }
 
-async function responderComContexto(pergunta, resumos) {
+async function responderComContexto(pergunta, resumos, source = 'dashboard') {
   const contexto = resumos
     .map(r => `[${periodoLabel(r.periodo)}]\n${r.resumo}`)
     .join('\n\n');
 
-  const prompt = `Com base nos resumos financeiros abaixo, responda a pergunta de forma direta e objetiva em português. Use os valores reais dos resumos. Se a informação não estiver nos resumos, diga que não tem dados suficientes.
+  const formato = source === 'whatsapp'
+    ? 'Formato: texto simples para WhatsApp, sem markdown, no máximo 6 linhas curtas.'
+    : 'Formato: até 12 linhas. Pode usar **negrito** e listas com "- ". Sem títulos com #.';
+
+  const prompt = `Você é a SOUZ, consultora financeira de lojistas de celular. Responda em português, de forma direta.
+
+Como responder:
+- Números: use SOMENTE os valores dos resumos abaixo. Nunca invente valor. Se perguntarem um número de um período que não está nos resumos, diga que ainda não tem esse período.
+- Conselhos, recomendações e próximos passos: analise os números (margem, peso de cada despesa, comparação entre meses, o que cresceu ou caiu) e dê de 2 a 4 ações práticas e específicas para a loja, cada uma ligada a um número do resumo. Não responda que "não há dados suficientes" para recomendar — recomende com base no que existe.
+- Projeções: deixe claro que é estimativa e de qual dado partiu.
+${formato}
 
 Pergunta: ${pergunta}
 
