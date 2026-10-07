@@ -350,12 +350,31 @@ async function criarUsuario(req, res) {
   const permFinal  = papelFinal === 'funcionario' && Array.isArray(permissoes) ? JSON.stringify(permissoes) : null;
 
     const hash = await bcrypt.hash(senha, 10);
-    const result = await pool.query(
-      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, permissoes)
-       VALUES ($1,$2,$3,$4,$5,true,$6) RETURNING id, email, papel, cliente_id, nome`,
-      [email.toLowerCase(), hash, papelFinal, clienteId, nome || null, permFinal]
-    );
-    res.status(201).json(result.rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Cliente sem empresa escolhida ganha a própria empresa, como no cadastro público — sem isso o login abre sem cliente
+      let clienteFinal = clienteId || null;
+      if (papelFinal === 'cliente' && !clienteFinal) {
+        const { rows: [novo] } = await client.query(
+          'INSERT INTO clientes (nome) VALUES ($1) RETURNING id',
+          [(nome || email).trim()]
+        );
+        clienteFinal = novo.id;
+      }
+      const result = await client.query(
+        `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, permissoes)
+         VALUES ($1,$2,$3,$4,$5,true,$6) RETURNING id, email, papel, cliente_id, nome`,
+        [email.toLowerCase(), hash, papelFinal, clienteFinal, nome || null, permFinal]
+      );
+      await client.query('COMMIT');
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ erro: 'Email já cadastrado' });
     if (err.code === '23503') return res.status(400).json({ erro: 'Cliente não encontrado' });
