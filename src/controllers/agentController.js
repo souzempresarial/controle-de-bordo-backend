@@ -44,4 +44,26 @@ async function chat(req, res) {
   }
 }
 
-module.exports = { chat };
+async function historico(req, res) {
+  try {
+    const cached = await redis.get(`chat:${req.params.clienteId}`);
+    const mensagens = (Array.isArray(cached) ? cached : [])
+      .map(m => ({ role: m.role, content: m.content, source: m.source || 'dashboard' }));
+    res.json({ mensagens });
+  } catch (err) {
+    console.warn('[Agent] Redis historico error:', err.message);
+    res.json({ mensagens: [] });
+  }
+}
+
+async function limpar(req, res) {
+  try {
+    await redis.del(`chat:${req.params.clienteId}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Agent] Redis limpar error:', err.message);
+    res.status(500).json({ erro: 'Não foi possível limpar a conversa' });
+  }
+}
+
+module.exports = { chat, historico, limpar };
