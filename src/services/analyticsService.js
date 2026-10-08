@@ -5,7 +5,7 @@ const genAI       = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 const EMBED_MODEL = 'gemini-embedding-001';
 const CHAT_MODEL  = 'gemini-3.8-flash';
 const RESPOSTA_MODEL      = 'gemini-3.6-flash';
-const RESPOSTA_TIMEOUT_MS = 15000;
+const RESPOSTA_TIMEOUT_MS = 18000;
 
 // ---------- helpers ----------
 
@@ -135,38 +135,45 @@ async function buscarAnalytics(clienteId, pergunta) {
   return rows; // [{ periodo, resumo, similaridade }]
 }
 
-async function responderComContexto(pergunta, resumos, source = 'dashboard') {
-  const contexto = resumos
-    .map(r => `[${periodoLabel(r.periodo)}]\n${r.resumo}`)
-    .join('\n\n');
-
+// contexto: texto com o DRE de cada mês (services/dre.js → textoDRE)
+async function responderComContexto(pergunta, contexto, source = 'dashboard') {
   const formato = source === 'whatsapp'
     ? 'Formato: texto simples para WhatsApp, sem markdown, no máximo 6 linhas curtas.'
     : 'Formato: até 12 linhas. Pode usar **negrito** e listas com "- ". Sem títulos com #.';
 
   const prompt = `Você é a SOUZ, consultora financeira de lojistas de celular. Responda em português, de forma direta.
 
+Os números abaixo são o DRE oficial de cada mês, os mesmos da tela Financeiro do sistema, calculados agora.
+
 Como responder:
-- Números: use SOMENTE os valores dos resumos abaixo. Nunca invente valor. Se perguntarem um número de um período que não está nos resumos, diga que ainda não tem esse período.
-- Conselhos, recomendações e próximos passos: analise os números (margem, peso de cada despesa, comparação entre meses, o que cresceu ou caiu) e dê de 2 a 4 ações práticas e específicas para a loja, cada uma ligada a um número do resumo. Não responda que "não há dados suficientes" para recomendar — recomende com base no que existe.
+- Números: use SOMENTE os valores abaixo, sem recalcular nem arredondar. Faturamento = Receita Bruta. Resultado ou lucro do mês = Lucro Líquido. "Caixa do mês" é dinheiro que entrou e saiu da conta, não é lucro — só use se perguntarem de caixa. Se perguntarem de um mês que não está abaixo, diga que não há lançamentos nele.
+- Mês marcado como parcial ainda está em andamento: avise isso ao comparar com meses fechados.
+- Conselhos, recomendações e próximos passos: analise os números (margens, peso de cada despesa, comparação entre meses, o que cresceu ou caiu) e dê de 2 a 4 ações práticas e específicas para a loja, cada uma ligada a um número. Não responda que "não há dados suficientes" para recomendar — recomende com base no que existe.
 - Projeções: deixe claro que é estimativa e de qual dado partiu.
 ${formato}
 
 Pergunta: ${pergunta}
 
-Resumos disponíveis:
+DRE por mês:
 ${contexto}`;
 
   // Roda dentro do chat: API Gateway corta em 29s e o agente já gastou parte disso
-  const geracao = genAI.models.generateContent({
+  const inicio = Date.now();
+  const gerar = () => genAI.models.generateContent({
     model:    RESPOSTA_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config:   { temperature: 0.2, thinkingConfig: { thinkingLevel: 'low' } },
+    config:   { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
   });
   const limite = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout analytics')), RESPOSTA_TIMEOUT_MS));
 
+  // Gemini sobrecarregado devolve 503 na hora; uma nova tentativa costuma passar
+  const comRetentativa = gerar().catch(err => {
+    if (/503|high demand|overloaded|UNAVAILABLE/i.test(err.message) && Date.now() - inicio < 4000) return gerar();
+    throw err;
+  });
+
   try {
-    const result = await Promise.race([geracao, limite]);
+    const result = await Promise.race([comRetentativa, limite]);
     const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? result.text;
     return (text || '').trim();
   } catch (err) {
