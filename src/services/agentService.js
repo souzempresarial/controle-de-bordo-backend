@@ -124,7 +124,14 @@ async function callLLM(mensagem, historico, clienteNome, usuarioNome, source) {
     : promptBase;
 
   try {
-    return await callGemini(mensagem, historico, systemPrompt);
+    return await callGemini(mensagem, historico, systemPrompt).catch(err => {
+      // Gemini sobrecarregado devolve 503 na hora; uma nova tentativa costuma passar
+      if (/503|high demand|overloaded|UNAVAILABLE/i.test(err.message)) {
+        console.warn('[Agent] Gemini 503 — tentando de novo');
+        return callGemini(mensagem, historico, systemPrompt);
+      }
+      throw err;
+    });
   } catch (err) {
     console.warn('[Agent] Gemini falhou:', err.message, '— tentando DeepSeek...');
     if (process.env.DEEPSEEK_API_KEY) {
@@ -202,18 +209,22 @@ async function buscarLancamentos(clienteId, startDate, endDate, tipo, categoria,
     where += ` AND (subcategoria ILIKE $${idx} OR descricao ILIKE $${idx})`;
   }
 
-  const { rows } = await pool.query(
-    `SELECT id, tipo, valor, data, categoria, subcategoria, descricao, pagamento
-     FROM lancamentos WHERE ${where} ORDER BY data DESC LIMIT 100`,
-    params
-  );
-  return rows;
+  // Total e contagem sem LIMIT: a lista mostra só alguns, mas a soma tem que ser do período inteiro
+  const [{ rows }, { rows: [agg] }] = await Promise.all([
+    pool.query(
+      `SELECT id, tipo, valor, data, categoria, subcategoria, descricao, pagamento
+       FROM lancamentos WHERE ${where} ORDER BY data DESC LIMIT 20`,
+      params
+    ),
+    pool.query(`SELECT count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos WHERE ${where}`, params),
+  ]);
+  return { rows, quantidade: agg.quantidade, total: agg.total };
 }
 
-function formatarResultadoConsulta(rows, periodo, tipo) {
+function formatarResultadoConsulta({ rows, quantidade, total }, periodo, tipo) {
   const singular = tipo === 'Entrada' ? 'entrada' : tipo === 'Saída' ? 'saída' : 'lançamento';
   const plural   = tipo === 'Entrada' ? 'entradas' : tipo === 'Saída' ? 'saídas' : 'lançamentos';
-  const label    = rows.length === 1 ? singular : plural;
+  const label    = quantidade === 1 ? singular : plural;
 
   const periodoPrep = periodo
     ? ' ' + (`de ${periodo}`)
@@ -227,7 +238,6 @@ function formatarResultadoConsulta(rows, periodo, tipo) {
     return `Nenhum lançamento encontrado${periodoStr.trim() ? ' ' + periodoStr.trim() : ''}. Tente ajustar o período ou verifique se há dados cadastrados.`;
   }
 
-  const total = rows.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
   const exibir = rows.slice(0, 8);
 
   const linhas = exibir.map(r => {
@@ -239,8 +249,8 @@ function formatarResultadoConsulta(rows, periodo, tipo) {
     return `• ${dataStr} — ${descStr} — ${valorStr}`;
   });
 
-  let texto = `${rows.length} ${label}${periodoStr}:\n\n${linhas.join('\n')}`;
-  if (rows.length > 8) texto += `\n... e mais ${rows.length - 8} lançamentos`;
+  let texto = `${quantidade} ${label}${periodoStr}:\n\n${linhas.join('\n')}`;
+  if (quantidade > 8) texto += `\n... e mais ${quantidade - 8} lançamentos`;
   texto += `\n\nTotal: R$ ${total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
   return texto;
@@ -289,10 +299,10 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
     const subcategoria = dados.subcategoria || null;
     console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s cat=%s sub=%s', tipo, startDate, endDate, categoria, subcategoria);
 
-    const rows = await buscarLancamentos(clienteId, startDate, endDate, tipo, categoria, subcategoria);
-    console.log('[Agent][4] Lançamentos encontrados:', rows.length);
+    const consulta = await buscarLancamentos(clienteId, startDate, endDate, tipo, categoria, subcategoria);
+    console.log('[Agent][4] Lançamentos encontrados:', consulta.quantidade, '| total:', consulta.total);
 
-    const resposta = formatarResultadoConsulta(rows, periodo, tipo);
+    const resposta = formatarResultadoConsulta(consulta, periodo, tipo);
     console.log('[Agent][5] Resposta final (consulta):', resposta.slice(0, 200));
     return { resposta, acao: null };
   }
