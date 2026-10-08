@@ -1,13 +1,11 @@
 const { processarMensagem } = require('../services/agentService');
-const { GoogleGenAI }      = require('@google/genai');
+const { transcreverAudio }  = require('../services/audio');
 const redis  = require('../services/redis');
 const pool   = require('../models/db');
 const sender = require('./sender');
 
 const CHAT_MAX = 30;
 const CHAT_TTL = 604800;
-
-const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
 // ---------- helpers ----------
 
@@ -25,22 +23,6 @@ async function resolverCliente(telefone) {
     [telefone]
   );
   return rows[0] || null;
-}
-
-async function transcreverAudio(base64, mimeType) {
-  const result = await genAI.models.generateContent({
-    model:    'gemini-3.6-flash',
-    contents: [{
-      role:  'user',
-      parts: [
-        { inlineData: { mimeType: (mimeType || 'audio/ogg').split(';')[0], data: base64 } },
-        { text: 'Transcreva exatamente o que foi dito neste áudio em português. Retorne apenas a transcrição, sem explicações.' },
-      ],
-    }],
-    config: { temperature: 0.1 },
-  });
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? result.text;
-  return (text || '').trim();
 }
 
 // ---------- histórico Redis ----------

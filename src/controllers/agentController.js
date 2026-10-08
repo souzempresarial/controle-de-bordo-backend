@@ -1,4 +1,5 @@
 const { processarMensagem } = require('../services/agentService');
+const { transcreverAudio }  = require('../services/audio');
 const redis = require('../services/redis');
 
 const CHAT_MAX  = 30;    // mensagens por cliente
@@ -66,4 +67,20 @@ async function limpar(req, res) {
   }
 }
 
-module.exports = { chat, historico, limpar };
+const AUDIO_MAX_BASE64 = 8 * 1024 * 1024; // ~6 MB de áudio; o ditado tem no máximo 1 minuto
+
+async function transcrever(req, res) {
+  try {
+    const { audio, mimeType } = req.body;
+    if (!audio || typeof audio !== 'string') return res.status(400).json({ erro: 'Áudio não enviado' });
+    if (audio.length > AUDIO_MAX_BASE64) return res.status(413).json({ erro: 'Áudio muito longo. Grave até 1 minuto.' });
+    if (mimeType && !/^audio\//.test(mimeType)) return res.status(400).json({ erro: 'Formato de áudio inválido' });
+    const texto = await transcreverAudio(audio, mimeType);
+    res.json({ texto });
+  } catch (err) {
+    console.error('[Agent] Erro ao transcrever:', err.message);
+    res.status(500).json({ erro: 'Não consegui entender o áudio. Tente de novo.' });
+  }
+}
+
+module.exports = { chat, historico, limpar, transcrever };
