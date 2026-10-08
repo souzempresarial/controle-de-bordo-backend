@@ -183,3 +183,21 @@ CREATE TABLE IF NOT EXISTS log_acessos (
   ip          VARCHAR(50),
   data_hora   TIMESTAMP DEFAULT NOW()
 );
+-- PATRIMÔNIO IMPORTADO DO MERCADO PHONE (só itens aprovados na revisão)
+CREATE TABLE IF NOT EXISTS patrimonio_itens (
+  id              SERIAL PRIMARY KEY,
+  cliente_id      INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+  mes_chave       VARCHAR(7) NOT NULL,
+  mp_id           BIGINT,
+  descricao       TEXT,
+  imei            VARCHAR(40),
+  tipo            VARCHAR(20),
+  destino         VARCHAR(40) NOT NULL,
+  quantidade      INTEGER NOT NULL DEFAULT 1,
+  valor_custo     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  valor_venda     DECIMAL(12,2),
+  disponibilidade VARCHAR(60),
+  data_entrada    DATE,
+  importado_em    TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS patrimonio_itens_cliente_mes ON patrimonio_itens (cliente_id, mes_chave);
