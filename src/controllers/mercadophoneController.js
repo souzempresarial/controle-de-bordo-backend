@@ -92,7 +92,10 @@ async function buscarPagamentosVendas(vendas, inicio) {
   return resultado;
 }
 
-function mapAcessorioSub(str) {
+// tipoProduto = tipo cadastrado no MP; "premium" só vale pelo tipo, porque nomes como "CAPA PREMIUM" são capa
+function mapAcessorioSub(str, tipoProduto = '') {
+  if (str.includes('brinde') || tipoProduto.includes('brinde')) return 'Brindes';
+  if (tipoProduto.includes('premium')) return 'Premium';
   if (str.includes('fonte')) return 'Fonte Turbo';
   if (str.includes('cabo') || str.includes('carregador')) return 'Cabo / Carregador';
   if (str.includes('pelicula') || str.includes('película') || str.includes('capa') || str.includes('case')) return 'Capa e Película';
@@ -135,10 +138,12 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   if (cv.includes('upgrade') || tv.includes('upgrade') || str.includes('upgrade'))
     return { categoria: 'Aparelhos', subcategoria: 'Upgrade' };
 
-  // Acessórios — detecta pela descrição do produto
+  // Brinde e acessório também pelo tipo do produto no MP ("CHOCOLATE - BRINDE", "ACESSÓRIOS PREMIUM"), não só pelo nome
+  if (str.includes('brinde') || tp.includes('brinde'))
+    return { categoria: 'Acessórios', subcategoria: 'Brindes' };
   const acessorioKw = ['cabo', 'pelicula', 'película', 'capa', 'case', 'capinha', 'carregador', 'película 3d', 'fonte'];
-  if (acessorioKw.some(k => str.includes(k)))
-    return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str) };
+  if (acessorioKw.some(k => str.includes(k)) || tp.includes('acess'))
+    return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str, tp) };
 
   // Aparelhos — usa marca (marcaDescricao) como sinal adicional
   if (str.includes('iphone') || (ma.includes('apple') && str.includes('iphone'))) return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
@@ -161,6 +166,7 @@ function mpItemKey(vendaId, descricao) {
 }
 
 function mapCmvSub(subcategoria, categoria) {
+  if (subcategoria === 'Brindes')                          return 'Brindes';
   if ((categoria || '').toLowerCase().includes('acess'))   return 'Acessórios';
   if ((categoria || '').toLowerCase().includes('assist'))  return 'Assistência Técnica';
   const s = (subcategoria || '').toLowerCase();
