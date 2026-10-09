@@ -6,6 +6,7 @@ const patrimonio = require('../controllers/patrimonioController');
 router.get('/status',            ctrl.status);
 router.get('/chaves',            ctrl.listarChaves);
 router.post('/chaves',           ctrl.adicionarChave);
+router.patch('/chaves/:chaveId',  ctrl.configurarChave);
 router.delete('/chaves/:chaveId', ctrl.removerChave);
 router.put('/chave',             ctrl.salvarChave);   // legado
 router.post('/preview',          ctrl.preview);

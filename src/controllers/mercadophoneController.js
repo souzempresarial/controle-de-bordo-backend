@@ -13,7 +13,7 @@ function mpFetch(url, apiKey, timeoutMs = 30000) {
 
 async function getApiKeys(clienteId) {
   const { rows } = await pool.query(
-    'SELECT id, nome, api_key FROM mercadophone_chaves WHERE cliente_id = $1 AND ativa = true ORDER BY id',
+    'SELECT id, nome, api_key, COALESCE(valor_liquido, false) AS valor_liquido FROM mercadophone_chaves WHERE cliente_id = $1 AND ativa = true ORDER BY id',
     [clienteId]
   );
   return rows;
@@ -192,7 +192,7 @@ async function status(req, res) {
 async function listarChaves(req, res) {
   try {
     const { rows } = await pool.query(
-      'SELECT id, nome, LEFT(api_key, 6) || \'...\' || RIGHT(api_key, 4) AS api_key_masked, ativa, criado_em FROM mercadophone_chaves WHERE cliente_id = $1 ORDER BY id',
+      'SELECT id, nome, LEFT(api_key, 6) || \'...\' || RIGHT(api_key, 4) AS api_key_masked, ativa, COALESCE(valor_liquido, false) AS valor_liquido, criado_em FROM mercadophone_chaves WHERE cliente_id = $1 ORDER BY id',
       [req.params.clienteId]
     );
     res.json(rows);
@@ -214,6 +214,21 @@ async function adicionarChave(req, res) {
     res.json({ ok: true, chave: rows[0] });
   } catch (err) {
     console.error('[MP adicionarChave]', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+}
+
+async function configurarChave(req, res) {
+  try {
+    const { clienteId, chaveId } = req.params;
+    const { rows } = await pool.query(
+      'UPDATE mercadophone_chaves SET valor_liquido = $1 WHERE id = $2 AND cliente_id = $3 RETURNING id, COALESCE(valor_liquido, false) AS valor_liquido',
+      [!!req.body.valorLiquido, chaveId, clienteId]
+    );
+    if (!rows.length) return res.status(404).json({ erro: 'Chave não encontrada' });
+    res.json({ ok: true, chave: rows[0] });
+  } catch (err) {
+    console.error('[MP configurarChave]', err.message);
     res.status(500).json({ erro: err.message });
   }
 }
@@ -389,6 +404,13 @@ async function preview(req, res) {
         ? pagamentos.filter(ehPagamentoAparelho).reduce((s, p) => s + parseFloat(p.valor || 0), 0)
         : 0;
 
+      // Chave "valor líquido": o valorTotal do MP é o que a loja recebeu; a diferença pro valor cobrado é taxa (dedução)
+      const chaveItem  = chavePorId.get(item._chaveId) || chavePorNome.get(item._chaveNome) || chaves[0];
+      const liquido    = parseFloat(item.valorTotal);
+      const deducaoSugerida = chaveItem?.valor_liquido && !isNaN(liquido) && liquido > 0 && valorFinal - liquido > 0.01
+        ? Math.round((valorFinal - liquido) * 100) / 100
+        : null;
+
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = keyDoItem(item);
       const jaImp      = idsImportados.has(itemKey);
@@ -410,6 +432,7 @@ async function preview(req, res) {
         tipoVendaOriginal: item.tipoVendaDescricao  || '',
         canalOriginal:     item.canalVendaDescricao || '',
         desconto:          descontoVal > 0 ? descontoVal : null,
+        deducaoSugerida,
         isUpgrade:         valorAparel > 0,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         resumoPagamentos:  ehPrincipal && pagamentos.length ? resumirPagamentos(pagamentos) : '',
@@ -718,4 +741,4 @@ async function osImportar(req, res) {
   }
 }
 
-module.exports = { status, listarChaves, adicionarChave, salvarChave, removerChave, preview, importar, osPreview, osImportar };
+module.exports = { status, listarChaves, adicionarChave, salvarChave, configurarChave, removerChave, preview, importar, osPreview, osImportar };

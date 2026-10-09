@@ -27,6 +27,9 @@ WHERE mercadophone_api_key IS NOT NULL
     SELECT 1 FROM mercadophone_chaves WHERE cliente_id = clientes.id
   );
 
+-- Loja que digita no MP o valor unitário já líquido (sem a taxa): a diferença pro valor de exibição vira dedução
+ALTER TABLE mercadophone_chaves ADD COLUMN IF NOT EXISTS valor_liquido BOOLEAN DEFAULT FALSE;
+
 -- LANÇAMENTOS
 CREATE TABLE IF NOT EXISTS lancamentos (
   id             SERIAL PRIMARY KEY,
