@@ -37,6 +37,8 @@ Dicas para casos comuns:
 - parcela de empréstimo, financiamento → Dívidas / Empréstimos > Parcela de Empréstimo
 - Meta, Facebook Ads, Google Ads, Instagram → Despesas Variáveis > Mídia Paga
 
+Não extraia dinheiro guardado na própria conta (reserva, cofrinho, caixinha, aplicação automática — ex: "Dinheiro Guardado / Reserva Stone"): o dinheiro continua da loja, não é despesa.
+
 Regras: valores positivos, datas YYYY-MM-DD, ignore entradas e saldos, use EXATAMENTE os nomes da lista. Se não tiver segurança da subcategoria, use "Outro" da categoria certa. Retorne APENAS o JSON.${blocoExemplos}`;
 }
 
@@ -188,6 +190,8 @@ async function processarExtrato(file, clienteId, dataInicio, dataFim) {
       const isLixo = l => {
         const low = l.toLowerCase();
         if (PREFIXOS_TX.some(p => low.startsWith(p))) return false;
+        // Linha com valor é transação: a Stone põe o banco do recebedor ("Banco Inter S.A.") na mesma linha do valor
+        if (/R\$\s*[\d.]+,\d{2}/.test(l)) return false;
         return /agên|ag\.\s*\d|conta:/i.test(l) ||
           /\bBCO\b|\bBANCO\b/i.test(l) ||
           /S\.A\.\s*\(\d+\)/i.test(l) ||
