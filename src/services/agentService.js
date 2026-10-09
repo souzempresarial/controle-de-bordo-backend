@@ -117,8 +117,8 @@ async function callDeepSeek(mensagem, historico, systemPrompt) {
 
 // ---------- orquestrador com fallback ----------
 
-async function callLLM(mensagem, historico, clienteNome, usuarioNome, source) {
-  const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source);
+async function callLLM(mensagem, historico, clienteNome, usuarioNome, source, telasLiberadas) {
+  const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source, telasLiberadas);
   const systemPrompt = clienteNome
     ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
     : promptBase;
@@ -258,10 +258,11 @@ function formatarResultadoConsulta({ rows, quantidade, total }, periodo, tipo) {
 
 // ---------- ponto de entrada ----------
 
-async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard') {
+// telasLiberadas: slugs que um funcionário pode ver; null = dono (vê tudo)
+async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard', telasLiberadas = null) {
   console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome, '| source:', source);
 
-  const textoLLM = await callLLM(mensagem, historico, clienteNome, usuarioNome, source);
+  const textoLLM = await callLLM(mensagem, historico, clienteNome, usuarioNome, source, telasLiberadas);
 
   const parsed = parseResposta(textoLLM);
   const { intent_type, body, data: dados = {} } = parsed;
@@ -284,7 +285,8 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
     const lancamento = await criarLancamento(clienteId, tipo, { ...dados, valor: valorNum, data: dataISO });
     console.log('[Agent][4] Lançamento criado:', JSON.stringify(lancamento));
 
-    const resposta = body || `${tipo} de R$ ${valorNum.toLocaleString('pt-BR')} registrada!`;
+    // Diz onde o lançamento ficou, pra pessoa saber onde conferir ou corrigir
+    const resposta = `${body || `${tipo} de R$ ${valorNum.toLocaleString('pt-BR')} registrada!`} Já aparece em Conciliações Bancárias.`;
     console.log('[Agent][5] Resposta final:', resposta);
     return { resposta, acao: tipo, lancamento };
   }

@@ -24,6 +24,7 @@ Mensagem (dashboard, bolinha ou WhatsApp)
 | Arquivo | Papel |
 |---|---|
 | `src/prompts/agentPrompt.js` | Prompt do sistema: persona, tools, formato JSON, categorias, palavras-chave |
+| `src/prompts/guia-uso.md` | Guia das telas que a IA usa para tirar dúvidas de "como faço". **Atualizar sempre que mudar tela, botão ou nome de menu.** Funcionário só recebe instrução das telas liberadas para ele |
 | `src/services/agentService.js` | Orquestração: chamada à IA, parser, execução das tools |
 | `src/services/analyticsService.js` | `responderComContexto`: 2ª chamada à IA para análises e conselhos |
 | `src/services/dre.js` | DRE mensal no backend. **Cópia** de `controle-de-bordo-react/src/services/dre.js`; as duas precisam ficar iguais |

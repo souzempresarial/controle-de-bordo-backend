@@ -1,8 +1,28 @@
-function buildSystemPrompt(dataHoraBrasilia, usuarioNome, source = 'dashboard') {
+const fs   = require('fs');
+const path = require('path');
+
+// Guia de uso das telas (o cabeçalho do arquivo é nota interna, fica de fora)
+const GUIA_USO = (() => {
+  const texto = fs.readFileSync(path.join(__dirname, 'guia-uso.md'), 'utf8');
+  const inicio = texto.indexOf('## Menu lateral');
+  return (inicio >= 0 ? texto.slice(inicio) : texto).trim();
+})();
+
+// slug de permissão → nome da tela no menu
+const TELAS = {
+  chat: 'SOUZ AI', dashboard: 'Visão Geral', lancamentos: 'Conciliações Bancárias', relatorio: 'Resumo Executivo',
+  contas: 'Gestão de Contas', financeiro: 'Financeiro', upgrade: 'Controle de Upgrade', exportar: 'Exportar', integracoes: 'Integrações',
+};
+
+// telasLiberadas: lista de slugs do funcionário; null = vê tudo (dono da loja)
+function buildSystemPrompt(dataHoraBrasilia, usuarioNome, source = 'dashboard', telasLiberadas = null) {
   const saudacao = usuarioNome ? `Você está conversando com ${usuarioNome}.` : '';
   const canal = source === 'whatsapp'
     ? 'Canal: WhatsApp. O campo body vai direto pro celular: texto simples, sem markdown, sem tabelas, no máximo 3 frases curtas.'
     : 'Canal: dashboard da Souz Finance.';
+  const acesso = Array.isArray(telasLiberadas)
+    ? `Este acesso é de funcionário e só vê estas telas: ${telasLiberadas.map(s => TELAS[s]).filter(Boolean).join(', ') || 'nenhuma'}. Se perguntarem como usar uma tela fora dessa lista, diga que ela não está liberada para este acesso e que é preciso falar com o responsável da loja.`
+    : '';
 
   return `Você é a SOUZ, assistente financeira da Souz Finance — sistema de gestão para lojistas de celular.
 
@@ -156,7 +176,7 @@ NÃO USE consultar_analytics para:
 TOOL 5 — outro
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 O QUE FAZ: Responde perguntas gerais sem acionar ferramentas de lançamento ou consulta.
-QUANDO USAR: Saudações, dúvidas sobre o sistema, perguntas que não envolvem dados financeiros.
+QUANDO USAR: Saudações, dúvidas sobre como usar o sistema (responda seguindo o GUIA DE USO abaixo), perguntas que não envolvem dados financeiros.
 
 {
   "intent_type": "outro",
@@ -256,6 +276,16 @@ Saídas — Serviços / Impostos / Dívidas:
 - Valores: R$ com ponto de milhar e vírgula decimal (ex: R$ 1.200,00)
 - Datas na resposta: formato DD/MM
 - Emojis com moderação — só quando der leveza, nunca em erros
+
+━━━ DÚVIDAS SOBRE COMO USAR O SISTEMA ━━━
+Quando perguntarem como fazer algo no sistema (lançar, importar extrato, quitar conta, exportar, conectar o Mercado Phone etc.), responda com intent "outro" usando SOMENTE o GUIA DE USO abaixo.
+- Diga em qual tela fica e o passo a passo, com os nomes dos botões exatamente como estão no guia.
+- Resposta curta: só os passos que respondem a pergunta, não o guia inteiro.
+- Se o guia não cobre a pergunta, NÃO invente tela, botão ou caminho: diga que não tem certeza e oriente a falar com a equipe SOUZ.
+${acesso}
+
+GUIA DE USO:
+${GUIA_USO}
 
 ━━━ REGRAS FINAIS ━━━
 1. Nunca invente categorias. Sem correspondência exata → subcategoria "Outro"

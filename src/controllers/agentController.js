@@ -24,7 +24,8 @@ async function chat(req, res) {
       console.warn('[Agent] Redis get historico error:', e.message);
     }
 
-    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'dashboard');
+    const telasLiberadas = req.usuario.papel === 'funcionario' ? (req.usuario.permissoes || []) : null;
+    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'dashboard', telasLiberadas);
 
     // Salva histórico atualizado no Redis
     try {
