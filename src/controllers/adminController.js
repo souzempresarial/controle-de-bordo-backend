@@ -4,7 +4,7 @@ const pool = require('../models/db');
 const CMVCATS      = ['Custos Variáveis Diretos'];
 const SGA_CATS     = ['Custos Variáveis Indiretos','Despesas com Ocupação','Despesas com Pessoal','Despesas Variáveis','Softwares / Tecnologias','Serviços Terceirizados','Impostos'];
 const NAOOP_CATS   = ['Dívidas / Empréstimos','Saídas Não-Operacionais'];
-const DEDUCOES_CATS = ['Deduções das Vendas', 'Downgrade'];
+const DEDUCOES_CATS = ['Deduções das Vendas'];
 const APORTE_CATS  = ['Aportes e Transferências'];
 
 const DIAS_ESFRIANDO = 7;
@@ -113,7 +113,7 @@ async function ranking(req, res) {
         -- DFC (base caixa): espelha Financeiro.jsx — exclui CMV, deduz valor_upgrade das entradas
         COALESCE(SUM(CASE
           WHEN l.tipo = 'Entrada' AND NOT COALESCE(l.is_cmv, false) AND l.categoria NOT IN (${sqlIn(CMVCATS)})
-          THEN l.valor - COALESCE(l.valor_upgrade, 0)
+          THEN l.valor - LEAST(COALESCE(l.valor_upgrade, 0), l.valor)
           ELSE 0
         END), 0) AS dfc_entradas,
         COALESCE(SUM(CASE

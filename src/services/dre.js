@@ -57,6 +57,10 @@ function normalizar(l) {
   };
 }
 
+// Aparelho recebido na troca abate do caixa da venda até zerar; no downgrade a diferença devolvida já é a saída "Downgrade"
+// (mesma regra de upgradeNoCaixa em controle-de-bordo-react/src/services/utils.js)
+const upgradeNoCaixa = l => (l.tipo === 'Entrada' && l.valorUpgrade > 0 ? Math.min(l.valorUpgrade, l.valor) : 0);
+
 // DRE dos meses com lançamento desde `desde` (YYYY-MM-01), igual à tela Financeiro, mais o caixa do mês
 async function dreMensal(clienteId, desde) {
   const [{ rows: lancs }, { rows: metas }] = await Promise.all([
@@ -72,7 +76,7 @@ async function dreMensal(clienteId, desde) {
     const base = calcDREBase(lm);
     const lucroLiq = base.ebitda + base.resFin - manual(mes, 'depreciacao') - manual(mes, 'irpj');
     const caixa = lm.filter(l => !l.isCMV && l.categoria !== 'Custos Variáveis Diretos' && !(l.tipo === 'Saída' && l.status === 'Pendente'));
-    const entCaixa = caixa.filter(l => l.tipo === 'Entrada').reduce((a, l) => a + (l.valorRecebido ?? (l.valor - (l.valorUpgrade || 0))), 0);
+    const entCaixa = caixa.filter(l => l.tipo === 'Entrada').reduce((a, l) => a + (l.valorRecebido ?? (l.valor - upgradeNoCaixa(l))), 0);
     const saiCaixa = caixa.filter(l => l.tipo === 'Saída').reduce((a, l) => a + l.valor, 0);
     return { mes, ...base, lucroLiq, entCaixa, saiCaixa, detalhe: detalheSubcategorias(lm) };
   });
