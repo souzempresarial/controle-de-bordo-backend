@@ -74,8 +74,42 @@ async function dreMensal(clienteId, desde) {
     const caixa = lm.filter(l => !l.isCMV && l.categoria !== 'Custos Variáveis Diretos' && !(l.tipo === 'Saída' && l.status === 'Pendente'));
     const entCaixa = caixa.filter(l => l.tipo === 'Entrada').reduce((a, l) => a + (l.valorRecebido ?? (l.valor - (l.valorUpgrade || 0))), 0);
     const saiCaixa = caixa.filter(l => l.tipo === 'Saída').reduce((a, l) => a + l.valor, 0);
-    return { mes, ...base, lucroLiq, entCaixa, saiCaixa };
+    return { mes, ...base, lucroLiq, entCaixa, saiCaixa, detalhe: detalheSubcategorias(lm) };
   });
+}
+
+// Grupos de saída do DRE abertos por subcategoria, pra IA enxergar o que pesa dentro de cada um (ex: pró-labore em Pessoal)
+const GRUPOS_DETALHE = [
+  ['Deduções das Vendas', 'Deduções'],
+  ['Custos Variáveis Indiretos', 'Custos Variáveis Indiretos'],
+  ['Despesas com Pessoal', 'Pessoal'],
+  ['Despesas com Ocupação', 'Ocupação'],
+  ['Despesas Variáveis', 'Variáveis'],
+  ['Softwares / Tecnologias', 'Softwares'],
+  ['Serviços Terceirizados', 'Terceirizados'],
+  ['Impostos', 'Impostos'],
+  ['Dívidas / Empréstimos', 'Dívidas (juros e encargos)'],
+  ['Saídas Não-Operacionais', 'Não-operacionais'],
+];
+const MAX_SUBS = 5;
+
+function detalheSubcategorias(lm) {
+  const proLabore = lm.filter(l => l.tipo === 'Saída' && l.categoria === 'Despesas com Pessoal' && l.subcategoria === 'Pró-Labore / PLR')
+    .reduce((a, l) => a + l.valor, 0);
+  const grupos = GRUPOS_DETALHE.map(([cat, nome]) => {
+    // Amortização é pagamento do principal: fica fora do DRE, igual ao calcDREBase
+    const doGrupo = lm.filter(l => l.tipo === 'Saída' && l.categoria === cat && !(cat === 'Dívidas / Empréstimos' && l.subcategoria === 'Amortização'));
+    const porSub = {};
+    for (const l of doGrupo) porSub[l.subcategoria || 'Outro'] = (porSub[l.subcategoria || 'Outro'] || 0) + l.valor;
+    // Dedução informada dentro da própria venda também entra nas Deduções do DRE (mesma conta do calcDREBase)
+    if (cat === 'Deduções das Vendas') {
+      const naVenda = lm.filter(l => l.tipo === 'Entrada' && l.valorRecebido != null && l.subcategoria !== 'Upgrade').reduce((a, l) => a + (l.valor - l.valorRecebido), 0);
+      if (naVenda) porSub['Dedução informada na venda (taxa/desconto)'] = naVenda;
+    }
+    const subs = Object.entries(porSub).sort((a, b) => b[1] - a[1]);
+    return { nome, total: subs.reduce((a, [, v]) => a + v, 0), subs };
+  }).filter(g => g.total > 0);
+  return { proLabore, grupos };
 }
 
 const NOMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -93,7 +127,23 @@ Custos Variáveis Indiretos ${brl(d.custosVarInd)} · Margem de Contribuição $
 Despesas SG&A ${brl(d.sga)} (Pessoal ${brl(d.pessoal)}, Ocupação ${brl(d.ocupacao)}, Variáveis ${brl(d.variaveis)}, Softwares ${brl(d.softwares)}, Terceirizados ${brl(d.terceiros)}, Impostos ${brl(d.impostos)})
 EBITDA ${brl(d.ebitda)} · Resultado Financeiro ${brl(d.resFin)}
 Lucro Líquido ${brl(d.lucroLiq)} (margem líquida ${pct(d.lucroLiq, d.recBruta)})
-Caixa do mês: entrou ${brl(d.entCaixa)}, saiu ${brl(d.saiCaixa)}`;
+Caixa do mês: entrou ${brl(d.entCaixa)}, saiu ${brl(d.saiCaixa)}${textoDetalhe(d)}`;
+}
+
+function textoDetalhe(d) {
+  if (!d.detalhe) return '';
+  const { proLabore, grupos } = d.detalhe;
+  const linhas = grupos.map(g => {
+    const top = g.subs.slice(0, MAX_SUBS).map(([s, v]) => `${s} ${brl(v)} (${pct(v, g.total)})`);
+    const resto = g.subs.slice(MAX_SUBS).reduce((a, [, v]) => a + v, 0);
+    if (resto > 0) top.push(`demais ${brl(resto)}`);
+    return `- ${g.nome} ${brl(g.total)}: ${top.join(', ')}`;
+  });
+  if (!linhas.length) return '';
+  const retirada = proLabore > 0
+    ? `\nRetirada dos sócios (Pró-Labore / PLR): ${brl(proLabore)} — ${pct(proLabore, d.recBruta)} da receita; lucro líquido do mês ${brl(d.lucroLiq)}`
+    : '';
+  return `\nDetalhe por subcategoria (% dentro do grupo):\n${linhas.join('\n')}${retirada}`;
 }
 
 module.exports = { calcDREBase, dreMensal, textoDRE };

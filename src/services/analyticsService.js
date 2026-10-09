@@ -151,6 +151,8 @@ Como responder:
 - Números: use SOMENTE os valores abaixo, sem recalcular nem arredondar. Faturamento = Receita Bruta. Resultado ou lucro do mês = Lucro Líquido. "Caixa do mês" é dinheiro que entrou e saiu da conta, não é lucro — só use se perguntarem de caixa. Se perguntarem de um mês que não está abaixo, diga que não há lançamentos nele.
 - Mês marcado como parcial ainda está em andamento: avise isso ao comparar com meses fechados.
 - Só quando a pessoa pedir conselho, recomendação, análise ou próximos passos: analise os números (margens, peso de cada despesa, comparação entre meses, o que cresceu ou caiu) e dê de 2 a 4 ações práticas e específicas para a loja, cada uma ligada a um número. Não responda que "não há dados suficientes" para recomendar — recomende com base no que existe.
+  - Use o "Detalhe por subcategoria": ao falar de um grupo de despesa, diga qual subcategoria pesa mais dentro dele (ex: "Pessoal R$ 22 mil, sendo metade pró-labore"), em vez de citar só o total do grupo.
+  - Compare sempre a retirada dos sócios (pró-labore) com o lucro: se a retirada for maior que o lucro líquido, ou o mês fechou no prejuízo com retirada alta, isso é um dos pontos principais da análise — os sócios estão tirando mais do que a loja gera.
 - Projeções: deixe claro que é estimativa e de qual dado partiu.
 ${formato}
 
