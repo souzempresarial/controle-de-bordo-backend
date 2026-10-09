@@ -174,6 +174,9 @@ ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes JSONB DEFAULT NULL;
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultimo_acesso TIMESTAMP;
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultimo_ip    VARCHAR(50);
 
+-- Migração: cadastro público esperando aprovação do admin (contas antigas desativadas ficam false)
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS aguardando_aprovacao BOOLEAN DEFAULT FALSE;
+
 -- LOG DE ACESSOS
 CREATE TABLE IF NOT EXISTS log_acessos (
   id          SERIAL PRIMARY KEY,

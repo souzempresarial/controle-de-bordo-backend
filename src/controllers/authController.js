@@ -68,11 +68,11 @@ async function avisarAdminNovaConta(nome, email) {
 const MAX_FALHAS = 5;
 const JANELA_FALHAS_MIN = 15;
 
-// Conta inativa que nunca entrou é cadastro esperando aprovação, não conta desativada
+// Cadastro público ainda não aprovado ≠ conta que o admin desativou
 function msgContaInativa(usuario) {
-  return usuario.ultimo_acesso
-    ? 'Conta desativada. Entre em contato com o suporte.'
-    : 'Sua conta está aguardando aprovação da equipe SOUZ Finance. Você vai conseguir entrar assim que for liberada.';
+  return usuario.aguardando_aprovacao
+    ? 'Sua conta está aguardando aprovação da equipe SOUZ Finance. Você vai conseguir entrar assim que for liberada.'
+    : 'Conta desativada. Entre em contato com o suporte.';
 }
 
 function ipDe(req) {
@@ -272,8 +272,8 @@ async function registrarPublico(req, res) {
 
     // Nasce inativa: só entra depois que o admin aprovar no painel
     await client.query(
-      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, token_verificacao, token_expira_em, ativo)
-       VALUES ($1,$2,'cliente',$3,$4,false,$5,$6,false)`,
+      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, token_verificacao, token_expira_em, ativo, aguardando_aprovacao)
+       VALUES ($1,$2,'cliente',$3,$4,false,$5,$6,false,true)`,
       [email.toLowerCase(), hash, cliente.id, nome, token, expira]
     );
 
@@ -451,7 +451,7 @@ async function listarUsuarios(req, res) {
       `SELECT u.id, u.email, u.papel, u.cliente_id, u.nome, u.criado_em, u.email_verificado,
               COALESCE(u.ativo, true) AS ativo, COALESCE(u.plano, 'trial') AS plano,
               c.nome AS cliente_nome, u.permissoes, u.ultimo_acesso,
-              (COALESCE(u.ativo, true) = false AND u.ultimo_acesso IS NULL) AS aguardando_aprovacao
+              COALESCE(u.aguardando_aprovacao, false) AS aguardando_aprovacao
        FROM usuarios u LEFT JOIN clientes c ON c.id = u.cliente_id
        ORDER BY u.criado_em DESC`
     );
@@ -483,7 +483,8 @@ async function toggleAtivo(req, res) {
   if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   try {
     const { rows } = await pool.query(
-      'UPDATE usuarios SET ativo = NOT COALESCE(ativo, true) WHERE id = $1 RETURNING COALESCE(ativo, true) AS ativo',
+      // Qualquer decisão do admin (aprovar ou desativar) tira a conta da fila de aprovação
+      'UPDATE usuarios SET ativo = NOT COALESCE(ativo, true), aguardando_aprovacao = false WHERE id = $1 RETURNING COALESCE(ativo, true) AS ativo',
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ erro: 'Usuário não encontrado' });
