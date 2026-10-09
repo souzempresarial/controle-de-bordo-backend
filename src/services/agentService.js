@@ -118,7 +118,7 @@ async function callDeepSeek(mensagem, historico, systemPrompt) {
 // ---------- orquestrador com fallback ----------
 
 async function callLLM(mensagem, historico, clienteNome, usuarioNome, source, telasLiberadas) {
-  const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source, telasLiberadas);
+  const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source, telasLiberadas, !historico?.length);
   const systemPrompt = clienteNome
     ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
     : promptBase;

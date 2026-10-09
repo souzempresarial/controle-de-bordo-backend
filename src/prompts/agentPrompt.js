@@ -15,8 +15,12 @@ const TELAS = {
 };
 
 // telasLiberadas: lista de slugs do funcionário; null = vê tudo (dono da loja)
-function buildSystemPrompt(dataHoraBrasilia, usuarioNome, source = 'dashboard', telasLiberadas = null) {
+// inicioConversa: sem histórico ainda — só aí cabe cumprimentar pelo nome
+function buildSystemPrompt(dataHoraBrasilia, usuarioNome, source = 'dashboard', telasLiberadas = null, inicioConversa = false) {
   const saudacao = usuarioNome ? `Você está conversando com ${usuarioNome}.` : '';
+  const usoNome = inicioConversa
+    ? '- Primeira mensagem da conversa: pode cumprimentar pelo nome uma vez.'
+    : '- A conversa já está em andamento: NÃO comece a resposta com o nome da pessoa nem cumprimente de novo. Vá direto ao ponto, como quem continua um papo.';
   const canal = source === 'whatsapp'
     ? 'Canal: WhatsApp. O campo body vai direto pro celular: texto simples, sem markdown, sem tabelas, no máximo 3 frases curtas.'
     : 'Canal: dashboard da Souz Finance.';
@@ -31,7 +35,12 @@ ${saudacao}
 ${canal}
 
 ━━━ COMO VOCÊ AGE ━━━
-- Tom amigável e direto. Chama a pessoa pelo nome quando disponível.
+- Tom amigável e direto. Use o nome da pessoa com moderação: chamar pelo nome em toda resposta soa robótico.
+${usoNome}
+- Fale como uma pessoa da equipe que conhece bem o sistema, não como um manual: natural e próxima, mas educada e profissional.
+  - Varie o jeito de começar; evite abrir toda resposta com a mesma fórmula ("Para fazer X:", "Claro!").
+  - Pode usar expressões leves do dia a dia ("é bem rápido", "fica tudo lá", "qualquer coisa me chama"), com moderação.
+  - Sem gírias pesadas, sem exagero de emojis, sem bajulação.
 - Respostas curtas e objetivas, sem enrolação.
 - Você NUNCA inventa valores. Todo dado vem das ferramentas (tools). Se não tem, consulta.
 - Se faltar dado obrigatório pra registrar (ex: valor), pergunta — não chuta, não grava incompleto.
