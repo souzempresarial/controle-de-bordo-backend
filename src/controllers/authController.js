@@ -46,6 +46,54 @@ async function enviarEmailVerificacao(email, nome, token) {
   );
 }
 
+async function avisarAdminNovaConta(nome, email) {
+  const { rows: admins } = await pool.query("SELECT email FROM usuarios WHERE papel = 'admin' AND COALESCE(ativo, true)");
+  if (!admins.length) return;
+  await axios.post(
+    process.env.BRAVE_SMTP_SENDEMAIL_ENDPOINT_URL,
+    {
+      sender:      { name: 'SOUZ Finance', email: 'erpsouz@gmail.com' },
+      to:          admins.map(a => ({ email: a.email })),
+      subject:     `Nova conta aguardando aprovação — ${nome}`,
+      htmlContent: `<p>Uma nova conta confirmou o e-mail e está aguardando sua aprovação:</p>
+        <p><strong>${escHtml(nome)}</strong> — ${escHtml(email)}</p>
+        <p>Para liberar, abra o painel admin, aba Usuários, e mude de <strong>Inativo</strong> para <strong>Ativo</strong>. Se não reconhecer, exclua a conta.</p>`,
+    },
+    { headers: { 'Content-Type': 'application/json', 'api-key': process.env.BRAVE_ENDPOINT_KEY } }
+  );
+}
+
+// ─── Proteção contra força bruta ─────────────────────────────────────────────
+// Guardado no banco porque o rate limit em memória vale só por instância do Lambda
+const MAX_FALHAS = 5;
+const JANELA_FALHAS_MIN = 15;
+
+// Conta inativa que nunca entrou é cadastro esperando aprovação, não conta desativada
+function msgContaInativa(usuario) {
+  return usuario.ultimo_acesso
+    ? 'Conta desativada. Entre em contato com o suporte.'
+    : 'Sua conta está aguardando aprovação da equipe SOUZ Finance. Você vai conseguir entrar assim que for liberada.';
+}
+
+function ipDe(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+}
+
+function registrarFalha(email, ip, motivo) {
+  pool.query('INSERT INTO log_tentativas (email, ip, motivo) VALUES ($1, $2, $3)', [(email || '').toLowerCase().slice(0, 255), ip, motivo])
+    .catch(err => console.error('[Auth] log_tentativas:', err.message));
+  console.warn(`[Auth] Falha de login: ${motivo} | ${email} | ${ip}`);
+}
+
+async function emailBloqueado(email) {
+  const { rows: [r] } = await pool.query(
+    `SELECT count(*)::int AS n FROM log_tentativas
+     WHERE email = $1 AND motivo = 'senha_incorreta' AND data_hora > NOW() - ($2 || ' minutes')::interval`,
+    [email.toLowerCase(), String(JANELA_FALHAS_MIN)]
+  );
+  return r.n >= MAX_FALHAS;
+}
+
 // ─── Login com Google ────────────────────────────────────────────────────────
 
 async function loginGoogle(req, res) {
@@ -68,36 +116,18 @@ async function loginGoogle(req, res) {
     const { email, name } = info;
     if (!email) return res.status(401).json({ erro: 'E-mail não disponível' });
 
-    let { rows } = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
-    let usuario = rows[0];
+    // Google só entra em conta já criada pelo admin; não cria conta nova
+    const { rows } = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
+    const usuario = rows[0];
 
     if (!usuario) {
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const nomeFinal = name || email.split('@')[0];
-        const { rows: [novoCliente] } = await client.query(
-          'INSERT INTO clientes (nome) VALUES ($1) RETURNING id',
-          [nomeFinal]
-        );
-        const placeholderHash = `google:${crypto.randomBytes(32).toString('hex')}`;
-        const { rows: [novoUsuario] } = await client.query(
-          `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado)
-           VALUES ($1,$2,'cliente',$3,$4,true) RETURNING *`,
-          [email.toLowerCase(), placeholderHash, novoCliente.id, nomeFinal]
-        );
-        await client.query('COMMIT');
-        usuario = novoUsuario;
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
-      }
+      registrarFalha(email, ipDe(req), 'google_sem_conta');
+      return res.status(403).json({ erro: 'Não encontramos uma conta com este e-mail. Fale com a equipe SOUZ Finance para liberar seu acesso.' });
     }
 
     if (usuario.ativo === false) {
-      return res.status(403).json({ erro: 'Conta desativada. Entre em contato com o suporte.' });
+      registrarFalha(email, ipDe(req), 'conta_inativa');
+      return res.status(403).json({ erro: msgContaInativa(usuario) });
     }
 
     const token = jwt.sign(
@@ -150,19 +180,28 @@ async function login(req, res) {
       }
     }
 
+    const ip = ipDe(req);
+    if (await emailBloqueado(email)) {
+      registrarFalha(email, ip, 'bloqueado');
+      return res.status(429).json({ erro: `Muitas tentativas com senha errada. Aguarde ${JANELA_FALHAS_MIN} minutos e tente de novo. Se esqueceu a senha, use "Esqueci minha senha".` });
+    }
+
     const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
     const usuario = result.rows[0];
 
     if (!usuario || !await bcrypt.compare(senha, usuario.senha_hash)) {
+      registrarFalha(email, ip, usuario ? 'senha_incorreta' : 'email_inexistente');
       return res.status(401).json({ erro: 'Email ou senha incorretos' });
     }
 
     if (!usuario.email_verificado) {
+      registrarFalha(email, ip, 'email_nao_verificado');
       return res.status(403).json({ erro: 'Confirme seu e-mail antes de fazer login. Verifique sua caixa de entrada.' });
     }
 
     if (usuario.ativo === false) {
-      return res.status(403).json({ erro: 'Conta desativada. Entre em contato com o suporte.' });
+      registrarFalha(email, ip, 'conta_inativa');
+      return res.status(403).json({ erro: msgContaInativa(usuario) });
     }
 
     const token = jwt.sign(
@@ -180,7 +219,6 @@ async function login(req, res) {
     });
 
     // Registrar acesso
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
     pool.query(
       'UPDATE usuarios SET ultimo_acesso = NOW(), ultimo_ip = $1 WHERE id = $2',
       [ip, usuario.id]
@@ -232,9 +270,10 @@ async function registrarPublico(req, res) {
       [nome]
     );
 
+    // Nasce inativa: só entra depois que o admin aprovar no painel
     await client.query(
-      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, token_verificacao, token_expira_em)
-       VALUES ($1,$2,'cliente',$3,$4,false,$5,$6)`,
+      `INSERT INTO usuarios (email, senha_hash, papel, cliente_id, nome, email_verificado, token_verificacao, token_expira_em, ativo)
+       VALUES ($1,$2,'cliente',$3,$4,false,$5,$6,false)`,
       [email.toLowerCase(), hash, cliente.id, nome, token, expira]
     );
 
@@ -246,7 +285,7 @@ async function registrarPublico(req, res) {
       console.error('[Auth] Erro ao enviar e-mail de verificação:', err.message);
     }
 
-    res.status(201).json({ mensagem: 'Conta criada! Verifique seu e-mail para ativar o acesso.' });
+    res.status(201).json({ mensagem: 'Conta criada! Confirme seu e-mail; depois disso a equipe SOUZ Finance libera seu acesso.' });
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(400).json({ erro: 'E-mail já cadastrado' });
@@ -266,7 +305,7 @@ async function verificarEmail(req, res) {
       `UPDATE usuarios
        SET email_verificado = true, token_verificacao = null, token_expira_em = null
        WHERE token_verificacao = $1 AND token_expira_em > NOW() AND email_verificado = false
-       RETURNING id, nome`,
+       RETURNING id, nome, email, COALESCE(ativo, true) AS ativo`,
       [token]
     );
 
@@ -274,6 +313,11 @@ async function verificarEmail(req, res) {
       return res.status(400).json({ erro: 'Link inválido ou expirado. Solicite um novo.' });
     }
 
+    const u = result.rows[0];
+    if (!u.ativo) {
+      avisarAdminNovaConta(u.nome, u.email).catch(err => console.error('[Auth] Aviso ao admin falhou:', err.message));
+      return res.json({ mensagem: 'E-mail confirmado! Agora a equipe SOUZ Finance vai liberar seu acesso.' });
+    }
     res.json({ mensagem: 'E-mail verificado com sucesso! Você já pode fazer login.' });
   } catch (err) {
     console.error('[auth]', err.message);

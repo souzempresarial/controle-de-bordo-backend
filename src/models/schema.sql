@@ -201,3 +201,13 @@ CREATE TABLE IF NOT EXISTS patrimonio_itens (
   importado_em    TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS patrimonio_itens_cliente_mes ON patrimonio_itens (cliente_id, mes_chave);
+
+-- TENTATIVAS DE LOGIN QUE FALHARAM (auditoria e bloqueio por força bruta)
+CREATE TABLE IF NOT EXISTS log_tentativas (
+  id        SERIAL PRIMARY KEY,
+  email     VARCHAR(255),
+  ip        VARCHAR(60),
+  motivo    VARCHAR(40),
+  data_hora TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS log_tentativas_email_data ON log_tentativas (email, data_hora);
