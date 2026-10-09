@@ -7,6 +7,85 @@ const NAOOP_CATS   = ['Dívidas / Empréstimos','Saídas Não-Operacionais'];
 const DEDUCOES_CATS = ['Deduções das Vendas', 'Downgrade'];
 const APORTE_CATS  = ['Aportes e Transferências'];
 
+const DIAS_ESFRIANDO = 7;
+const DIAS_PARADO    = 14;
+
+// Saúde de uso por cliente: se o cliente entra, se tem lançamento recente e o que está pendente
+async function clientesSaude(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.nome,
+        (SELECT count(*)::int FROM usuarios u WHERE u.cliente_id = c.id) AS acessos,
+        (SELECT max(la.data_hora) FROM log_acessos la JOIN usuarios u ON u.id = la.usuario_id
+          WHERE u.cliente_id = c.id AND u.papel <> 'admin') AS ultimo_acesso,
+        (SELECT count(*)::int FROM log_acessos la JOIN usuarios u ON u.id = la.usuario_id
+          WHERE u.cliente_id = c.id AND u.papel <> 'admin' AND la.data_hora > NOW() - interval '30 days') AS entradas_30d,
+        (SELECT count(*)::int FROM lancamentos l WHERE l.cliente_id = c.id AND NOT COALESCE(l.is_cmv, false)
+          AND l.criado_em > NOW() - interval '7 days') AS lanc_7d,
+        (SELECT max(l.criado_em) FROM lancamentos l WHERE l.cliente_id = c.id) AS ultimo_lancamento,
+        (SELECT count(*)::int FROM contas co WHERE co.cliente_id = c.id AND co.tipo = 'pagar'
+          AND co.status = 'pendente' AND co.vencimento < CURRENT_DATE) AS contas_vencidas,
+        (SELECT count(*)::int FROM lancamentos l WHERE l.cliente_id = c.id AND l.origem = 'ia'
+          AND l.criado_em > NOW() - interval '30 days') AS lanc_ia_30d,
+        EXISTS (SELECT 1 FROM mercadophone_chaves k WHERE k.cliente_id = c.id AND k.ativa) AS mp_conectado
+      FROM clientes c
+      WHERE EXISTS (SELECT 1 FROM usuarios u WHERE u.cliente_id = c.id)`);
+
+    // Conversa com a SOUZ AI fica no Redis (chat:{clienteId})
+    let conversas = [];
+    try {
+      const redis = require('../services/redis');
+      conversas = rows.length ? await redis.mget(...rows.map(r => `chat:${r.id}`)) : [];
+    } catch (e) { console.warn('[admin.clientesSaude] Redis:', e.message); }
+
+    const agora = Date.now();
+    const clientes = rows.map((r, i) => {
+      const dias = r.ultimo_acesso ? Math.floor((agora - new Date(r.ultimo_acesso)) / 86400000) : null;
+      const situacao = dias === null
+        ? (r.ultimo_lancamento ? 'parado' : 'novo')
+        : dias >= DIAS_PARADO ? 'parado' : dias >= DIAS_ESFRIANDO ? 'esfriando' : 'usando';
+      const msgs = Array.isArray(conversas[i]) ? conversas[i].filter(m => m.role === 'user').length : 0;
+      return { ...r, dias_sem_acesso: dias, situacao, souz_ai_mensagens: msgs };
+    });
+    const ordem = { parado: 0, esfriando: 1, novo: 2, usando: 3 };
+    clientes.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || (b.contas_vencidas - a.contas_vencidas) || a.nome.localeCompare(b.nome));
+    res.json(clientes);
+  } catch (err) {
+    console.error('[admin.clientesSaude]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
+async function tentativas(req, res) {
+  if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
+  try {
+    const [{ rows: lista }, { rows: [resumo] }, { rows: bloqueados }] = await Promise.all([
+      pool.query(`
+        SELECT t.id, t.email, t.ip, t.motivo, t.data_hora,
+               u.nome, c.nome AS cliente_nome, (u.id IS NOT NULL) AS conhecido
+        FROM log_tentativas t
+        LEFT JOIN usuarios u ON u.email = t.email
+        LEFT JOIN clientes c ON c.id = u.cliente_id
+        WHERE t.data_hora > NOW() - interval '30 days'
+        ORDER BY t.data_hora DESC LIMIT 500`),
+      pool.query(`
+        SELECT count(*)::int AS falhas_24h,
+               count(DISTINCT ip)::int AS ips_24h,
+               count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.email = t.email))::int AS desconhecidos_24h
+        FROM log_tentativas t WHERE t.data_hora > NOW() - interval '24 hours'`),
+      pool.query(`
+        SELECT email FROM log_tentativas
+        WHERE motivo = 'senha_incorreta' AND data_hora > NOW() - interval '15 minutes'
+        GROUP BY email HAVING count(*) >= 5`),
+    ]);
+    res.json({ tentativas: lista, resumo: { ...resumo, bloqueados: bloqueados.map(b => b.email) } });
+  } catch (err) {
+    console.error('[admin.tentativas]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
 function sqlIn(cats) {
   return cats.map(c => `'${c.replace(/'/g, "''")}'`).join(',');
 }
@@ -88,4 +167,4 @@ async function ranking(req, res) {
   }
 }
 
-module.exports = { ranking };
+module.exports = { ranking, clientesSaude, tentativas };

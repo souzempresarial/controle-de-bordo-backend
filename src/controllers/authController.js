@@ -450,7 +450,8 @@ async function listarUsuarios(req, res) {
     const result = await pool.query(
       `SELECT u.id, u.email, u.papel, u.cliente_id, u.nome, u.criado_em, u.email_verificado,
               COALESCE(u.ativo, true) AS ativo, COALESCE(u.plano, 'trial') AS plano,
-              c.nome AS cliente_nome, u.permissoes
+              c.nome AS cliente_nome, u.permissoes, u.ultimo_acesso,
+              (COALESCE(u.ativo, true) = false AND u.ultimo_acesso IS NULL) AS aguardando_aprovacao
        FROM usuarios u LEFT JOIN clientes c ON c.id = u.cliente_id
        ORDER BY u.criado_em DESC`
     );

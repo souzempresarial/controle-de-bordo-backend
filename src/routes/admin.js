@@ -7,5 +7,7 @@ router.get('/ranking', autenticar, (req, res, next) => {
   if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
   next();
 }, controller.ranking);
+router.get('/clientes-saude', autenticar, controller.clientesSaude);
+router.get('/tentativas',     autenticar, controller.tentativas);
 
 module.exports = router;
