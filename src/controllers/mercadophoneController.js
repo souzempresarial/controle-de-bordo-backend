@@ -442,14 +442,19 @@ async function preview(req, res) {
         item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao,
         item.canalVendaDescricao, item.marcaDescricao
       );
-      const hist = !['Upgrade'].includes(regra.subcategoria) && regra.categoria !== 'Assistência Técnica'
+      const valorFinal    = valorFinalItem(item);
+      // Sinais fortes vencem o histórico: a palavra "brinde", upgrade e assistência
+      const sinalForte = ['Upgrade', 'Brindes'].includes(regra.subcategoria) || regra.categoria === 'Assistência Técnica';
+      const hist = !sinalForte
         ? historicoCat.get((item.aparelhoDescricao || item.tipoProdutoDescricao || '').trim().toLowerCase())
         : null;
-      const { categoria, subcategoria } = hist || regra;
+      let { categoria, subcategoria } = hist || regra;
+      // Acessório ou produto que saiu de graça na venda é brinde (o custo vai para CMV > Brindes)
+      const brindeGratis = valorFinal === 0 && ['Acessórios', 'Outros Produtos'].includes(categoria) && subcategoria !== 'Brindes';
+      if (brindeGratis) { categoria = 'Acessórios'; subcategoria = 'Brindes'; }
 
       const descontoVal   = parseFloat(item.desconto || 0);
       const qty           = parseInt(item.quantidade || 1);
-      const valorFinal    = valorFinalItem(item);
       const chaveMP       = `${(item.dataVenda || '').slice(0, 10)}-${valorFinal.toFixed(2)}`;
 
       const pagamentos    = pagamentosPorVenda.get(item.vendaId) || [];
@@ -490,7 +495,7 @@ async function preview(req, res) {
         canalOriginal:     item.canalVendaDescricao || '',
         desconto:          descontoVal > 0 ? descontoVal : null,
         deducaoSugerida,
-        categoriaPeloHistorico: !!hist,
+        categoriaPeloHistorico: !!hist && !brindeGratis,
         isUpgrade:         valorAparel > 0,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         resumoPagamentos:  ehPrincipal && pagamentos.length ? resumirPagamentos(pagamentos) : '',
