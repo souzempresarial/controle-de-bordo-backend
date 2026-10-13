@@ -141,22 +141,56 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   // Brinde e acessório também pelo tipo do produto no MP ("CHOCOLATE - BRINDE", "ACESSÓRIOS PREMIUM"), não só pelo nome
   if (str.includes('brinde') || tp.includes('brinde'))
     return { categoria: 'Acessórios', subcategoria: 'Brindes' };
-  const acessorioKw = ['cabo', 'pelicula', 'película', 'capa', 'case', 'capinha', 'carregador', 'película 3d', 'fonte'];
-  if (acessorioKw.some(k => str.includes(k)) || tp.includes('acess'))
-    return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str, tp) };
+  // O tipo do produto no MP é o sinal mais confiável; o nome só decide quando o tipo é genérico ou vazio
+  const tpn = normalizar(tipoProduto), apn = normalizar(aparelho), nome = apn || tpn;
+  const tem = (s, kws) => kws.some(k => s.includes(k));
+  const outros = sub => ({ categoria: 'Outros Produtos', subcategoria: sub });
+  const acessorioKw = ['cabo', 'pelicula', 'capa', 'case', 'capinha', 'carregador', 'fonte', 'fone', 'power bank',
+    'suporte', 'microfone', 'mouse', 'teclado', 'pencil', 'adaptador', 'pop socket', 'kit'];
 
-  // Aparelhos — usa marca (marcaDescricao) como sinal adicional
-  if (str.includes('iphone') || (ma.includes('apple') && str.includes('iphone'))) return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
-  if (str.includes('airpods'))                                                      return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
-  if (str.includes('apple watch') || str.includes('watch'))                         return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
-  if (str.includes('ipad'))                                                          return { categoria: 'Aparelhos', subcategoria: 'iPad' };
-  if (str.includes('macbook') || str.includes('mac'))                               return { categoria: 'Aparelhos', subcategoria: 'Mac' };
-  const androidMarcas = ['samsung', 'motorola', 'xiaomi', 'redmi', 'lg', 'sony', 'asus', 'realme', 'oppo', 'oneplus', 'huawei', 'positivo', 'multilaser'];
-  if (str.includes('android') || androidMarcas.some(m => str.includes(m) || ma.includes(m)))
+  // Console antes de tudo: lojas cadastram PS5 como "APARELHO"
+  if (tem(nome, ['playstation', 'ps5', 'ps4', 'xbox', 'nintendo', 'videogame', 'video game', 'console']) || tem(tpn, ['playstation', 'console', 'videogame']))
+    return outros('Eletrônicos');
+
+  // "CAPA PARA CELULAR" também tem "celular" no tipo: com palavra de acessório não é aparelho
+  const ehCelular = tem(tpn, ['celular', 'smartphone', 'aparelho']) && !tem(tpn, acessorioKw) && !tem(tpn, ['acess']);
+  // Linha Apple vem pelo nome mesmo quando o MP marca como notebook ou tablet
+  const ehAcessorio = tem(tpn, ['acess']) || tem(tpn, acessorioKw) || tem(apn, acessorioKw);
+  if (!ehAcessorio && nome.includes('macbook'))                         return { categoria: 'Aparelhos', subcategoria: 'Mac' };
+  if (!ehAcessorio && nome.includes('ipad'))                            return { categoria: 'Aparelhos', subcategoria: 'iPad' };
+
+  if (!ehCelular) {
+    if (tem(tpn, ['chip']))                                          return outros('Outro');
+    if (tem(tpn, ['perfume']))                                       return outros('Perfumes');
+    if (tem(tpn, ['bebida']))                                        return outros('Bebidas');
+    if (tem(tpn, ['caixa de som', 'jbl']))                           return outros(nome.includes('jbl') ? 'JBL' : 'Eletrônicos');
+    if (tem(tpn, ['tablet']))  return nome.includes('ipad') ? { categoria: 'Aparelhos', subcategoria: 'iPad' } : outros('Informática');
+    if (tem(tpn, ['relogio', 'smartwatch']))
+      return nome.includes('apple watch') ? { categoria: 'Aparelhos', subcategoria: 'Apple Watch' } : outros('Eletrônicos');
+    if (tem(tpn, ['bike', 'bicicleta', 'patinete', 'scooter', 'eletric', 'depilador', 'secador']))  return outros('Eletrônicos');
+    if (tem(tpn, ['garrafa', 'termic']))                             return outros('Outro');
+    if (ehAcessorio)
+      return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str, tp) };
+    if (tem(tpn, ['notebook', 'informatica', 'computador']))        return outros('Informática');
+    if (tem(tpn, ['eletronic']))                                     return outros('Eletrônicos');
+  }
+
+  // Aparelhos — só com sinal de celular/Apple: o tipo "Celular" do MP, o nome ou a marca
+  if (nome.includes('iphone') || (ehCelular && ma.includes('apple')))   return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  if (nome.includes('airpods'))                                         return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
+  if (nome.includes('apple watch'))                                     return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
+  if (nome.includes('ipad'))                                            return { categoria: 'Aparelhos', subcategoria: 'iPad' };
+  if (nome.includes('macbook'))                                         return { categoria: 'Aparelhos', subcategoria: 'Mac' };
+  const androidMarcas = ['samsung', 'galaxy', 'motorola', 'moto g', 'xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus',
+    'huawei', 'positivo', 'multilaser', 'infinix', 'zte', 'nokia', 'lg ', 'asus'];
+  if (nome.includes('android') || androidMarcas.some(m => nome.includes(m) || ma.includes(m.trim())))
     return { categoria: 'Aparelhos', subcategoria: 'Android' };
-  if (ma.includes('apple')) return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  // Celular sem marca no nome ("14 PRO", "PREVENDA"): aparelho, sem chutar o sistema
+  if (ehCelular)                                                        return { categoria: 'Aparelhos', subcategoria: 'Outro' };
+  if (tem(nome, ['perfume']))                                           return outros('Perfumes');
 
-  return { categoria: 'Aparelhos', subcategoria: 'Outro' };
+  // Sem sinal de celular: Outros Produtos — errar aqui não infla o faturamento de aparelhos
+  return outros('Outro');
 }
 
 // Chave única por produto dentro de uma venda (vendaId pode ter múltiplos produtos)
@@ -373,6 +407,19 @@ async function preview(req, res) {
       if (!atual || valorFinalItem(item) > valorFinalItem(atual)) itemPrincipal.set(item.vendaId, item);
     }
 
+    // Categoria que o cliente já usou para o mesmo produto em importações anteriores (inclui correções feitas na mão).
+    // "Aparelhos > Outro" era o chute da regra antiga e Upgrade depende da venda, então não valem como histórico
+    const { rows: histRows } = await pool.query(
+      `SELECT DISTINCT ON (lower(trim(descricao))) lower(trim(descricao)) AS d, categoria, subcategoria
+       FROM lancamentos
+       WHERE cliente_id = $1 AND tipo = 'Entrada' AND obs LIKE '[MP-%' AND descricao IS NOT NULL
+         AND NOT (categoria = 'Aparelhos' AND subcategoria IN ('Outro', 'Upgrade'))
+         AND categoria <> 'Assistência Técnica'
+       ORDER BY lower(trim(descricao)), id DESC`,
+      [clienteId]
+    );
+    const historicoCat = new Map(histRows.map(r => [r.d, r]));
+
     const chavePorId   = new Map(chaves.map(c => [c.id, c]));
     const chavePorNome = new Map(chaves.map(c => [c.nome, c]));
     const vendasPendentes = new Map();
@@ -385,10 +432,14 @@ async function preview(req, res) {
     console.log(`[MP preview] ${vendasPendentes.size} vendas pendentes, ${pagamentosPorVenda.size} com pagamentos (${Date.now() - inicio}ms)`);
 
     const transacoes = items.map(item => {
-      const { categoria, subcategoria } = mapCategoria(
+      const regra = mapCategoria(
         item.tipoProdutoDescricao, item.tipoVendaDescricao, item.aparelhoDescricao,
         item.canalVendaDescricao, item.marcaDescricao
       );
+      const hist = !['Upgrade'].includes(regra.subcategoria) && regra.categoria !== 'Assistência Técnica'
+        ? historicoCat.get((item.aparelhoDescricao || item.tipoProdutoDescricao || '').trim().toLowerCase())
+        : null;
+      const { categoria, subcategoria } = hist || regra;
 
       const descontoVal   = parseFloat(item.desconto || 0);
       const qty           = parseInt(item.quantidade || 1);
@@ -433,6 +484,7 @@ async function preview(req, res) {
         canalOriginal:     item.canalVendaDescricao || '',
         desconto:          descontoVal > 0 ? descontoVal : null,
         deducaoSugerida,
+        categoriaPeloHistorico: !!hist,
         isUpgrade:         valorAparel > 0,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         resumoPagamentos:  ehPrincipal && pagamentos.length ? resumirPagamentos(pagamentos) : '',
