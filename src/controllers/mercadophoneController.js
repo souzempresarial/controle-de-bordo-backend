@@ -297,7 +297,7 @@ async function preview(req, res) {
 
     const LIMIT = 300;
 
-    // A API do MP ignora o parâmetro offset quando há filtro de data — retorna sempre os mesmos 300 itens.
+    // A API do MP ignora offset e devolve no máximo 300 itens por página; as seguintes vêm com o parâmetro page.
     // Para capturar itens do último dia do mês registrados com atraso no sistema, fazemos duas consultas:
     //   1. Mês completo: dataInicio → dataFim (captura a maioria dos itens)
     //   2. Último dia: dataFim → dataFim+1d (captura itens registrados no dia seguinte)
@@ -331,18 +331,24 @@ async function preview(req, res) {
       const itemsMap = new Map();
       for (const chave of chaves) {
         for (const { dataVendaInicial, dataVendaFinal } of buildQueries()) {
-          const params = new URLSearchParams({ limit: LIMIT });
-          if (dataVendaInicial) params.append('dataVendaInicial', dataVendaInicial);
-          if (dataVendaFinal)   params.append('dataVendaFinal',   dataVendaFinal);
+          // Máximo de 300 itens por página: loja com mais vendas no mês precisa das páginas seguintes
+          const rawItems = [];
+          for (let page = 1; page <= 20; page++) {
+            const params = new URLSearchParams({ limit: LIMIT, page });
+            if (dataVendaInicial) params.append('dataVendaInicial', dataVendaInicial);
+            if (dataVendaFinal)   params.append('dataVendaFinal',   dataVendaFinal);
 
-          const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
-          if (!mpResp.ok) {
-            const err = await mpResp.json().catch(() => ({}));
-            console.error(`[MP preview] chave ${chave.id} erro:`, err.detail || mpResp.status);
-            continue;
+            const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
+            if (!mpResp.ok) {
+              const err = await mpResp.json().catch(() => ({}));
+              console.error(`[MP preview] chave ${chave.id} página ${page} erro:`, err.detail || mpResp.status);
+              break;
+            }
+            const body   = await mpResp.json();
+            const doPage = body.items || [];
+            rawItems.push(...doPage);
+            if (doPage.length < LIMIT || (body.total && rawItems.length >= body.total)) break;
           }
-          const body  = await mpResp.json();
-          const rawItems = body.items || [];
 
           for (const item of rawItems) {
             if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
