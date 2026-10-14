@@ -64,9 +64,18 @@ async function lerVendasPorImei(apiKey) {
     const fim = new Date(hoje.getFullYear(), hoje.getMonth() - i + 1, 0);
     return [ini.toISOString().slice(0, 10), fim.toISOString().slice(0, 10)];
   });
-  const respostas = await Promise.all(meses.map(([ini, fim]) =>
-    mpFetch(`/sales/history?limit=300&dataVendaInicial=${ini}&dataVendaFinal=${fim}`, apiKey).catch(() => ({ items: [] }))
-  ));
+  // A API devolve no máximo 300 itens por página: loja grande precisa das páginas seguintes
+  const lerMes = async ([ini, fim]) => {
+    const items = [];
+    for (let page = 1; page <= 10; page++) {
+      const b = await mpFetch(`/sales/history?limit=300&page=${page}&dataVendaInicial=${ini}&dataVendaFinal=${fim}`, apiKey).catch(() => null);
+      if (!b) break;
+      items.push(...(b.items || []));
+      if ((b.items || []).length < 300 || (b.total && items.length >= b.total)) break;
+    }
+    return { items };
+  };
+  const respostas = await Promise.all(meses.map(lerMes));
   const vendas = new Map();
   for (const r of respostas) for (const s of r.items || []) {
     if ((s.statusVenda || '').toLowerCase() === 'cancelado') continue;
@@ -108,11 +117,20 @@ async function preview(req, res) {
         if (tipo === 'peca') alertas.push('Peça ou serviço — não entra por padrão');
 
         const imei = (item.imei || '').trim() || null;
+        const entrada = item.dataEntrada ? String(item.dataEntrada).slice(0, 10) : null;
+        const ultVenda = item.dataUltimaVenda ? String(item.dataUltimaVenda).slice(0, 10) : null;
+        // Aparelho é unidade única: última venda depois da entrada = vendido sem baixa no MP.
+        // Acessório não: a data só diz que saiu alguma unidade, o estoque é a quantidade
+        const vendidoSemBaixa = tipo === 'aparelho' && (parseInt(item.quantidade ?? 1) || 0) <= 1 && ultVenda && (!entrada || ultVenda >= entrada);
+        if (vendidoSemBaixa) {
+          alertas.push(`Vendido em ${ultVenda.split('-').reverse().join('/')} — sem baixa no Mercado Phone`);
+          aprovado = false;
+        }
         if (imei) {
           if (imeisVistos.has(imei)) { alertas.push('IMEI duplicado no estoque'); aprovado = false; }
           imeisVistos.add(imei);
           const vendidoEm = vendas.get(imei);
-          if (vendidoEm && (!item.dataEntrada || vendidoEm >= String(item.dataEntrada).slice(0, 10))) {
+          if (!vendidoSemBaixa && vendidoEm && (!entrada || vendidoEm >= entrada)) {
             alertas.push(`Consta como vendido em ${vendidoEm.split('-').reverse().join('/')}`);
             aprovado = false;
           }
