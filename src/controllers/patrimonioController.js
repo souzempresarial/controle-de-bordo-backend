@@ -106,6 +106,7 @@ async function preview(req, res) {
     }));
 
     const imeisVistos = new Set();
+    let vendidosFora = 0;
     const itens = [];
     for (const { chave, estoque, vendas } of lojas) {
       for (const item of estoque) {
@@ -121,25 +122,27 @@ async function preview(req, res) {
         const ultVenda = item.dataUltimaVenda ? String(item.dataUltimaVenda).slice(0, 10) : null;
         // Aparelho é unidade única: última venda depois da entrada = vendido sem baixa no MP.
         // Acessório não: a data só diz que saiu alguma unidade, o estoque é a quantidade
-        const vendidoSemBaixa = tipo === 'aparelho' && (parseInt(item.quantidade ?? 1) || 0) <= 1 && ultVenda && (!entrada || ultVenda >= entrada);
-        if (vendidoSemBaixa) {
-          alertas.push(`Vendido em ${ultVenda.split('-').reverse().join('/')} — sem baixa no Mercado Phone`);
-          aprovado = false;
+        const quantidade = Math.max(0, parseInt(item.quantidade ?? 1) || 0);
+        // Só estoque ainda não vendido entra na lista. Aparelho é unidade única: venda depois da
+        // entrada (pela data do MP ou pelo IMEI nas vendas) = já vendido, mesmo sem baixa no MP.
+        // Acessório não: a data só diz que saiu alguma unidade, o estoque é a quantidade
+        if (!quantidade) { vendidosFora++; continue; }
+        if (tipo === 'aparelho' && quantidade <= 1) {
+          const vendidoEm = imei ? vendas.get(imei) : null;
+          const vendido = [ultVenda, vendidoEm].some(d => d && (!entrada || d >= entrada));
+          if (vendido) { vendidosFora++; continue; }
         }
+        // "PREVENDA" é produto de controle do MP, não estoque
+        if (/^pre-?venda$/.test(norm(limparDescricao(item)))) { vendidosFora++; continue; }
         if (imei) {
           if (imeisVistos.has(imei)) { alertas.push('IMEI duplicado no estoque'); aprovado = false; }
           imeisVistos.add(imei);
-          const vendidoEm = vendas.get(imei);
-          if (!vendidoSemBaixa && vendidoEm && (!entrada || vendidoEm >= entrada)) {
-            alertas.push(`Consta como vendido em ${vendidoEm.split('-').reverse().join('/')}`);
-            aprovado = false;
-          }
+          // Aparelho com IMEI é uma unidade: quantidade maior é erro de cadastro (ex.: 966 iPhones iguais)
+          if (quantidade > 1) { alertas.push(`Quantidade ${quantidade} num aparelho com IMEI — erro de cadastro no Mercado Phone`); aprovado = false; }
         }
-        const quantidade = Math.max(0, parseInt(item.quantidade ?? 1) || 0);
         if (tipo !== 'aparelho' && quantidade > QTD_ALTA) alertas.push(`Quantidade alta (${quantidade}) — confira`);
         const custo = parseFloat(item.valorCusto || 0);
         if (!custo) alertas.push('Sem custo cadastrado');
-        if (!quantidade) aprovado = false;
 
         itens.push({
           mpId:            item.id,
@@ -161,7 +164,7 @@ async function preview(req, res) {
 
     const ordem = { aparelho: 0, acessorio: 1, peca: 2 };
     itens.sort((a, b) => ordem[a.tipo] - ordem[b.tipo] || b.custo * b.quantidade - a.custo * a.quantidade);
-    const resposta = { itens, lojas: chaves.length, geradoEm: new Date().toISOString() };
+    const resposta = { itens, vendidosFora, lojas: chaves.length, geradoEm: new Date().toISOString() };
     await redis.set(cacheKey, resposta, { ex: CACHE_TTL }).catch(() => {});
     res.json(resposta);
   } catch (err) {
