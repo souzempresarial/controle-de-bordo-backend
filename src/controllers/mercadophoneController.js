@@ -37,6 +37,8 @@ function mapFormaVenda(descricao, parcela) {
   if (f.includes('debito'))                                               return 'Débito';
   if (f.includes('dinheiro') || f.includes('especie'))                    return 'Dinheiro';
   if (f.includes('boleto'))                                               return 'Boleto';
+  // Maquininha com nome da loja ("MAQ FEF CELL", "MAQUINA REDE"), cartão ou link de pagamento
+  if (/\bmaq|maquin|cartao|\blink\b|stone|cielo|rede\b|getnet|sumup|pagseguro|infinit/.test(f)) return 'Crédito';
   if (parseInt(parcela) > 1)                                              return 'Crédito';
   return '';
 }
@@ -478,7 +480,7 @@ async function preview(req, res) {
       const temLiquido = chaveItem?.valor_liquido && !isNaN(liquido) && liquido > 0 && valorFinal - liquido > 0.01;
       // Com cartão a diferença é taxa (dedução). Sem cartão (PIX de financeira, ex.: "PIX - LUZ") a diferença
       // não é da loja: o faturamento é o próprio valor líquido
-      const pagouCartao = pagDinheiro.some(p => /cart|cr[eé]dito|d[eé]bito|maquin/i.test(p.formaPagamentoDescricao || ''));
+      const pagouCartao = pagDinheiro.some(p => mapFormaVenda(p.formaPagamentoDescricao, p.parcela) === 'Crédito' || mapFormaVenda(p.formaPagamentoDescricao, p.parcela) === 'Débito');
       const semPagamentos = !pagDinheiro.length;
       const deducaoSugerida = temLiquido && (pagouCartao || semPagamentos) ? Math.round((valorFinal - liquido) * 100) / 100 : null;
       const valorVenda = temLiquido && !deducaoSugerida ? Math.round(liquido * 100) / 100 : valorFinal;
