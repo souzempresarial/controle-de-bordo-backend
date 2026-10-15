@@ -469,9 +469,13 @@ async function preview(req, res) {
       // Chave "valor líquido": o valorTotal do MP é o que a loja recebeu; a diferença pro valor cobrado é taxa (dedução)
       const chaveItem  = chavePorId.get(item._chaveId) || chavePorNome.get(item._chaveNome) || chaves[0];
       const liquido    = parseFloat(item.valorTotal);
-      const deducaoSugerida = chaveItem?.valor_liquido && !isNaN(liquido) && liquido > 0 && valorFinal - liquido > 0.01
-        ? Math.round((valorFinal - liquido) * 100) / 100
-        : null;
+      const temLiquido = chaveItem?.valor_liquido && !isNaN(liquido) && liquido > 0 && valorFinal - liquido > 0.01;
+      // Com cartão a diferença é taxa (dedução). Sem cartão (PIX de financeira, ex.: "PIX - LUZ") a diferença
+      // não é da loja: o faturamento é o próprio valor líquido
+      const pagouCartao = pagDinheiro.some(p => /cart|cr[eé]dito|d[eé]bito|maquin/i.test(p.formaPagamentoDescricao || ''));
+      const semPagamentos = !pagDinheiro.length;
+      const deducaoSugerida = temLiquido && (pagouCartao || semPagamentos) ? Math.round((valorFinal - liquido) * 100) / 100 : null;
+      const valorVenda = temLiquido && !deducaoSugerida ? Math.round(liquido * 100) / 100 : valorFinal;
 
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = keyDoItem(item);
@@ -481,7 +485,7 @@ async function preview(req, res) {
         mpVendaId:         item.vendaId,
         mpItemKey:         itemKey,
         data:              (item.dataVenda || '').slice(0, 10),
-        valor:             valorFinal,
+        valor:             valorVenda,
         cmvValor:          parseFloat(item.valorCusto || 0),
         quantidade:        qty,
         categoria,
