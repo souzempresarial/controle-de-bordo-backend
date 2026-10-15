@@ -193,6 +193,11 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   return outros('Outro');
 }
 
+// Status da API: 'concluido', 'cancelada' ou 'orcamento' — só o primeiro é venda
+function vendaConcluida(item) {
+  return normalizar(item.statusVenda) === 'concluido';
+}
+
 // Chave única por produto dentro de uma venda (vendaId pode ter múltiplos produtos)
 function mpItemKey(vendaId, descricao) {
   const slug = (descricao || 'X').slice(0, 20).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
@@ -351,7 +356,8 @@ async function preview(req, res) {
           }
 
           for (const item of rawItems) {
-            if ((item.statusVenda || '').toLowerCase() === 'cancelado') continue;
+            // Só venda concluída: a API também devolve 'cancelada' e 'orcamento' (orçamento não é venda)
+            if (!vendaConcluida(item)) continue;
             if (dataFim && (item.dataVenda || '').slice(0, 10) > dataFim) continue;
 
             const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';

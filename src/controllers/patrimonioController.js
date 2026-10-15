@@ -78,7 +78,7 @@ async function lerVendasPorImei(apiKey) {
   const respostas = await Promise.all(meses.map(lerMes));
   const vendas = new Map();
   for (const r of respostas) for (const s of r.items || []) {
-    if ((s.statusVenda || '').toLowerCase() === 'cancelado') continue;
+    if (norm(s.statusVenda) !== 'concluido') continue; // cancelada e orçamento não são venda
     for (const im of [s.imei1, s.imei2]) {
       if (!im || im.length < 8) continue;
       const data = String(s.dataVenda || '').slice(0, 10);
