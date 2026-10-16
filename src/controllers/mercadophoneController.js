@@ -195,6 +195,9 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   return outros('Outro');
 }
 
+// Formas de pagamento que são financeira/crediário (nome como aparece no MP, sem acento, minúsculo)
+const FINANCEIRAS = ['luz'];
+
 // Status da API: 'concluido', 'cancelada' ou 'orcamento' — só o primeiro é venda
 function vendaConcluida(item) {
   return normalizar(item.statusVenda) === 'concluido';
@@ -478,12 +481,14 @@ async function preview(req, res) {
       const chaveItem  = chavePorId.get(item._chaveId) || chavePorNome.get(item._chaveNome) || chaves[0];
       const liquido    = parseFloat(item.valorTotal);
       const temLiquido = chaveItem?.valor_liquido && !isNaN(liquido) && liquido > 0 && valorFinal - liquido > 0.01;
-      // Com cartão a diferença é taxa (dedução). Sem cartão (PIX de financeira, ex.: "PIX - LUZ") a diferença
-      // não é da loja: o faturamento é o próprio valor líquido
+      // Com cartão a diferença entre o cobrado e o valor lançado no MP é a taxa da maquininha (dedução)
       const pagouCartao = pagDinheiro.some(p => mapFormaVenda(p.formaPagamentoDescricao, p.parcela) === 'Crédito' || mapFormaVenda(p.formaPagamentoDescricao, p.parcela) === 'Débito');
       const semPagamentos = !pagDinheiro.length;
       const deducaoSugerida = temLiquido && (pagouCartao || semPagamentos) ? Math.round((valorFinal - liquido) * 100) / 100 : null;
-      const valorVenda = temLiquido && !deducaoSugerida ? Math.round(liquido * 100) / 100 : valorFinal;
+      // Sem cartão (dinheiro/PIX) o cliente pagou o valor cheio e o dinheiro entrou: o faturamento é o cobrado.
+      // Exceção: financeira/crediário (ex.: "PIX - LUZ" do Arthur) — a loja fica só com o valor lançado no MP
+      const viaFinanceira = !pagouCartao && pagDinheiro.some(p => FINANCEIRAS.some(n => normalizar(p.formaPagamentoDescricao).includes(n)));
+      const valorVenda = temLiquido && viaFinanceira ? Math.round(liquido * 100) / 100 : valorFinal;
 
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = keyDoItem(item);
