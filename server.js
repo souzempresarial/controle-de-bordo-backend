@@ -76,6 +76,7 @@ app.use('/clientes/:clienteId/contas',            autenticar, autorizar, require
 app.use('/clientes/:clienteId/metas',             autenticar, autorizar, require('./src/routes/metas'));
 app.use('/clientes/:clienteId/saldo/:ano',        autenticar, autorizar, require('./src/routes/saldo'));
 app.use('/clientes/:clienteId/capital/:mesChave', autenticar, autorizar, require('./src/routes/capital'));
+app.use('/clientes/:clienteId/fechamento',        autenticar, autorizar, require('./src/routes/fechamento'));
 app.use('/clientes/:clienteId/extrato',           autenticar, autorizar, require('./src/routes/extrato'));
 app.use('/clientes/:clienteId/upgrade',           autenticar, autorizar, require('./src/routes/upgrade'));
 app.use('/clientes/:clienteId/mercadophone',      autenticar, autorizar, require('./src/routes/mercadophone'));
