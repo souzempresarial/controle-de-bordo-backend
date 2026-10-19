@@ -13,16 +13,32 @@ function extrairTelefone(remoteJid) {
   return (remoteJid || '').split('@')[0].replace(/\D/g, '');
 }
 
+// O WhatsApp manda 55 + DDD + número, e números antigos às vezes chegam sem o 9 da frente.
+// No perfil a pessoa pode ter salvo com ou sem o 55: casa por DDD + últimos 8 dígitos.
 async function resolverCliente(telefone) {
+  const semPais = telefone.startsWith('55') && telefone.length >= 12 ? telefone.slice(2) : telefone;
+  const ddd     = semPais.slice(0, 2);
+  const final8  = semPais.slice(-8);
   const { rows } = await pool.query(
     `SELECT u.cliente_id, u.nome AS usuario_nome, c.nome AS cliente_nome
      FROM usuarios u
      JOIN clientes c ON c.id = u.cliente_id
-     WHERE u.telefone = $1 AND u.ativo = true AND u.cliente_id IS NOT NULL
+     WHERE right(u.telefone, 8) = $1
+       AND (u.telefone LIKE $2 || '%' OR u.telefone LIKE '55' || $2 || '%')
+       AND u.ativo = true AND u.cliente_id IS NOT NULL
      LIMIT 1`,
-    [telefone]
+    [final8, ddd]
   );
   return rows[0] || null;
+}
+
+// Evolution reenvia quando demora: a mesma mensagem só é processada uma vez
+async function primeiraVez(chave, segundos) {
+  try {
+    return (await redis.set(chave, 1, { nx: true, ex: segundos })) === 'OK';
+  } catch {
+    return true; // sem Redis, melhor responder em dobro do que não responder
+  }
 }
 
 // ---------- histórico Redis ----------
@@ -50,68 +66,79 @@ async function salvarHistorico(clienteId, historico, mensagem, resposta) {
 // ---------- webhook ----------
 
 async function webhook(req, res) {
-  res.sendStatus(200); // responde imediatamente para a Evolution não reenviar
+  // A rota é pública: só aceita a Evolution, que chama com o token secreto na URL
+  const token = process.env.WHATSAPP_WEBHOOK_TOKEN;
+  if (!token || req.query.token !== token) return res.sendStatus(401);
 
   try {
-    const evento = req.body;
-    if (evento.event !== 'messages.upsert') return;
-
-    const data = evento.data;
-    if (!data || data.key?.fromMe) return;
-
-    const remoteJid = data.key?.remoteJid || '';
-    if (remoteJid.includes('@g.us')) return; // ignora grupos
-
-    const telefone = extrairTelefone(remoteJid);
-    if (!telefone) return;
-
-    // Resolve usuário pelo número
-    const cliente = await resolverCliente(telefone);
-    if (!cliente) {
-      await sender.enviarTexto(telefone, 'Seu número não está cadastrado no sistema. Entre em contato com o suporte.');
-      return;
-    }
-
-    const { cliente_id: clienteId, usuario_nome: usuarioNome, cliente_nome: clienteNome } = cliente;
-
-    // Extrai mensagem (texto ou áudio)
-    let mensagem = '';
-    const msgType = data.messageType;
-
-    if (msgType === 'conversation' || msgType === 'extendedTextMessage') {
-      mensagem = data.message?.conversation || data.message?.extendedTextMessage?.text || '';
-    } else if (msgType === 'audioMessage') {
-      const audioMsg = data.message?.audioMessage;
-      const base64   = audioMsg?.base64 || data.message?.base64;
-      if (!base64) {
-        await sender.enviarTexto(telefone, 'Não consegui processar o áudio. Pode enviar em texto?');
-        return;
-      }
-      mensagem = await transcreverAudio(base64, audioMsg?.mimetype);
-      if (!mensagem) {
-        await sender.enviarTexto(telefone, 'Não entendi o áudio. Pode repetir em texto?');
-        return;
-      }
-      console.log('[WhatsApp] Áudio transcrito:', mensagem.slice(0, 100));
-    } else {
-      return; // ignora imagens, stickers, etc.
-    }
-
-    if (!mensagem.trim()) return;
-    console.log('[WhatsApp] Mensagem de', telefone, '→ clienteId', clienteId, ':', mensagem.slice(0, 80));
-
-    // Pipeline do agente (igual à dashboard)
-    const historico = await carregarHistorico(clienteId);
-    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'whatsapp');
-
-    await salvarHistorico(clienteId, historico, mensagem.trim(), resultado.resposta);
-    await sender.enviarTexto(telefone, resultado.resposta);
-
-    console.log('[WhatsApp] Resposta enviada para', telefone, ':', resultado.resposta.slice(0, 80));
-
+    await processarEvento(req.body || {});
   } catch (err) {
     console.error('[WhatsApp] Erro no webhook:', err.message);
   }
+  // Na Lambda a execução congela depois da resposta: responde só no fim, mesmo com erro (senão a Evolution reenvia)
+  res.sendStatus(200);
 }
 
-module.exports = { webhook };
+async function processarEvento(evento) {
+  if (evento.event !== 'messages.upsert') return;
+  if (process.env.EVOLUTION_INSTANCE && evento.instance && evento.instance !== process.env.EVOLUTION_INSTANCE) return;
+
+  const data = evento.data;
+  if (!data || data.key?.fromMe) return;
+
+  const remoteJid = data.key?.remoteJid || '';
+  if (!remoteJid.endsWith('@s.whatsapp.net')) return; // ignora grupos, status e canais
+
+  const telefone = extrairTelefone(remoteJid);
+  if (!telefone) return;
+  if (data.key?.id && !(await primeiraVez(`wpp:msg:${data.key.id}`, 86400))) return;
+
+  // Resolve usuário pelo número
+  const cliente = await resolverCliente(telefone);
+  if (!cliente) {
+    // Número desconhecido recebe o aviso no máximo uma vez por dia
+    if (await primeiraVez(`wpp:desconhecido:${telefone}`, 86400)) {
+      await sender.enviarTexto(telefone, 'Oi! Este é o WhatsApp da SOUZ Finance. Seu número ainda não está ligado a um acesso do sistema: cadastre-o em "Meu perfil" ou fale com a equipe Souz.');
+    }
+    return;
+  }
+
+  const { cliente_id: clienteId, usuario_nome: usuarioNome, cliente_nome: clienteNome } = cliente;
+
+  // Extrai mensagem (texto ou áudio)
+  let mensagem = '';
+  const msgType = data.messageType;
+
+  if (msgType === 'conversation' || msgType === 'extendedTextMessage') {
+    mensagem = data.message?.conversation || data.message?.extendedTextMessage?.text || '';
+  } else if (msgType === 'audioMessage') {
+    const audioMsg = data.message?.audioMessage;
+    const base64   = audioMsg?.base64 || data.message?.base64;
+    if (!base64) {
+      await sender.enviarTexto(telefone, 'Não consegui processar o áudio. Pode enviar em texto?');
+      return;
+    }
+    mensagem = await transcreverAudio(base64, audioMsg?.mimetype);
+    if (!mensagem) {
+      await sender.enviarTexto(telefone, 'Não entendi o áudio. Pode repetir em texto?');
+      return;
+    }
+    console.log('[WhatsApp] Áudio transcrito:', mensagem.slice(0, 100));
+  } else {
+    return; // ignora imagens, stickers, etc.
+  }
+
+  if (!mensagem.trim()) return;
+  console.log('[WhatsApp] Mensagem de', telefone, '→ clienteId', clienteId, ':', mensagem.slice(0, 80));
+
+  // Pipeline do agente (igual à dashboard)
+  const historico = await carregarHistorico(clienteId);
+  const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'whatsapp');
+
+  await salvarHistorico(clienteId, historico, mensagem.trim(), resultado.resposta);
+  await sender.enviarTexto(telefone, resultado.resposta);
+
+  console.log('[WhatsApp] Resposta enviada para', telefone, ':', resultado.resposta.slice(0, 80));
+}
+
+module.exports = { webhook, resolverCliente };

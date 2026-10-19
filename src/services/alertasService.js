@@ -1,5 +1,6 @@
 const https = require('https');
 const pool  = require('../models/db');
+const sender = require('../whatsapp/sender');
 
 function escHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -28,6 +29,8 @@ async function buscarVencimentosPorCliente() {
       cl.nome                AS cliente_nome,
       u.email                AS cliente_email,
       u.nome                 AS usuario_nome,
+      u.telefone             AS usuario_telefone,
+      NULLIF(trim(cl.obs), '') AS loja,
       (co.vencimento::date - CURRENT_DATE) AS dias_restantes
     FROM contas co
     JOIN clientes cl ON cl.id = co.cliente_id
@@ -53,7 +56,8 @@ async function buscarVencimentosPorCliente() {
       porCliente[key] = {
         email:        row.cliente_email,
         nome:         row.usuario_nome || row.cliente_nome,
-        cliente_nome: row.cliente_nome,
+        cliente_nome: row.loja || row.cliente_nome,
+        telefone:     row.usuario_telefone || null,
         contas:       [],
       };
     }
@@ -161,16 +165,46 @@ function enviarEmail(destinatario, html, totalAlertas) {
   });
 }
 
+// Mesmo aviso do e-mail, em texto curto de WhatsApp (*negrito* do próprio WhatsApp).
+// Hoje, amanhã e 7 dias vêm item a item; 30 dias só o resumo, para a mensagem não virar um extrato.
+function buildWhatsApp(cliente, contas) {
+  const grupos = { 0: [], 1: [], 7: [], 30: [] };
+  contas.forEach(c => { const d = Number(c.dias_restantes); if (grupos[d]) grupos[d].push(c); });
+  const soma  = lista => lista.reduce((s, c) => s + parseFloat(c.valor || 0), 0);
+  const item  = c => `• ${c.descricao || c.subcategoria || c.categoria || 'Conta'} — ${fmtBRL(c.valor)}`;
+  const blocos = [];
+  if (grupos[0].length) blocos.push(`*Vence hoje*\n${grupos[0].map(item).join('\n')}`);
+  if (grupos[1].length) blocos.push(`*Vence amanhã*\n${grupos[1].map(item).join('\n')}`);
+  if (grupos[7].length) blocos.push(`*Vence em 7 dias*\n${grupos[7].map(item).join('\n')}`);
+  if (grupos[30].length) blocos.push(`*Em 30 dias:* ${grupos[30].length} conta(s), ${fmtBRL(soma(grupos[30]))}`);
+  const primeiroNome = String(cliente.nome || '').trim().split(' ')[0];
+  return [
+    `🔔 Contas a pagar — *${cliente.cliente_nome}*`,
+    `Oi${primeiroNome ? `, ${primeiroNome}` : ''}! Seguem os próximos vencimentos:`,
+    ...blocos,
+    `Total: *${fmtBRL(soma(contas))}*. Qualquer dúvida é só me chamar aqui.`,
+  ].join('\n\n');
+}
+
+// No perfil o número pode ter sido salvo sem o 55
+function numeroWhatsApp(tel) {
+  const d = String(tel || '').replace(/\D/g, '');
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d.length >= 12 ? d : null;
+}
+
 async function executarAlertas() {
   const hoje    = new Date();
   const clientes = await buscarVencimentosPorCliente();
 
   if (!clientes.length) {
     console.log('[Alertas] Nenhum vencimento para hoje.');
-    return { enviado: false, total: 0, clientes: 0 };
+    return { enviado: false, total: 0, clientes: 0, whatsapp: 0 };
   }
 
+  const wppLigado = !!(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY && process.env.EVOLUTION_INSTANCE);
   let totalEnviados = 0;
+  let totalWpp = 0;
   for (const cliente of clientes) {
     try {
       const html = buildHTML(cliente, cliente.contas, hoje);
@@ -180,10 +214,23 @@ async function executarAlertas() {
     } catch (err) {
       console.error(`[Alertas] Erro ao enviar para ${cliente.email}:`, err.message);
     }
+
+    // WhatsApp é um canal a mais: se falhar, o e-mail já foi
+    const numero = numeroWhatsApp(cliente.telefone);
+    if (wppLigado && numero) {
+      try {
+        await sender.enviarTexto(numero, buildWhatsApp(cliente, cliente.contas));
+        totalWpp++;
+        console.log(`[Alertas] WhatsApp enviado para ${cliente.email}.`);
+        await new Promise(r => setTimeout(r, 1500)); // espaça os envios: rajada de mensagens chama atenção do WhatsApp
+      } catch (err) {
+        console.error(`[Alertas] Erro no WhatsApp de ${cliente.email}:`, err.message);
+      }
+    }
   }
 
-  console.log(`[Alertas] Concluído: ${totalEnviados}/${clientes.length} e-mails enviados.`);
-  return { enviado: totalEnviados > 0, total: clientes.reduce((s, c) => s + c.contas.length, 0), clientes: totalEnviados };
+  console.log(`[Alertas] Concluído: ${totalEnviados}/${clientes.length} e-mails, ${totalWpp} WhatsApp.`);
+  return { enviado: totalEnviados > 0, total: clientes.reduce((s, c) => s + c.contas.length, 0), clientes: totalEnviados, whatsapp: totalWpp };
 }
 
-module.exports = { executarAlertas };
+module.exports = { executarAlertas, buildWhatsApp, numeroWhatsApp };
