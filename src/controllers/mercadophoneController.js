@@ -401,13 +401,17 @@ async function preview(req, res) {
       [clienteId]
     );
     const idsImportados = new Set();
+    const antigasPorChave = new Map();
     existentes.forEach(r => {
       const match = r.obs?.match(/\[MP-([^\] ]+)\]/)?.[1];
       if (!match) return;
       idsImportados.add(match);
       if (!match.includes(':') && r.descricao) {
-        const k2 = mpItemKey(match, r.descricao);
-        idsImportados.add(k2);
+        // Formato antigo "[MP-<venda>]": 2 itens iguais na venda viram base e base#2, como na chave nova
+        const k2  = mpItemKey(match, r.descricao);
+        const ord = (antigasPorChave.get(k2) || 0) + 1;
+        antigasPorChave.set(k2, ord);
+        idsImportados.add(ord > 1 ? `${k2}#${ord}` : k2);
       }
     });
 
@@ -963,9 +967,41 @@ async function calcularAjustes(clienteId, inicio, fim) {
       continue;
     }
 
-    const doMP   = itens.filter(i => String(i.vendaId) === vendaId);
-    const orfaos = doSistema.filter(l => !mpPorChave.has(chaveDe(l)));
-    const novos  = doMP.filter(i => !chavesImportadas.has(i._key));
+    // Casa cada lançamento com o item do MP pela chave; se não bater (importação antiga gravava só
+    // "[MP-<venda>]", sem o item), pela descrição dentro da mesma venda. Só sobra órfão o que mudou de verdade
+    const doMP  = itens.filter(i => String(i.vendaId) === vendaId);
+    const par   = new Map();
+    const usado = new Set();
+    for (const l of doSistema) {
+      const it = mpPorChave.get(chaveDe(l));
+      if (it && String(it.vendaId) === vendaId) { par.set(l, it); usado.add(it); }
+    }
+    for (const l of doSistema.filter(x => !par.has(x))) {
+      const livres = doMP.filter(i => !usado.has(i) && !chavesImportadas.has(i._key) &&
+        normalizar(i.aparelhoDescricao || i.tipoProdutoDescricao) === normalizar(l.descricao));
+      const it = livres.find(i => Math.abs(valorCobradoItem(i) - l.valor) <= TOLERANCIA) || livres[0];
+      if (it) { par.set(l, it); usado.add(it); }
+    }
+    // Mesmo valor com outro nome = item renomeado (cadastro do MP mudou, ou PREVENDA virou o aparelho entregue):
+    // renomeia e confere o custo em vez de apagar e importar de novo
+    // Produto que ainda existe na venda do MP, mas já foi casado com outro lançamento = lançado em dobro
+    const nomeMP    = i => normalizar(i.aparelhoDescricao || i.tipoProdutoDescricao);
+    const mesmoNome = l => doMP.filter(i => nomeMP(i) === normalizar(l.descricao)).length;
+    const emDobro   = doSistema.filter(l => !par.has(l) && mesmoNome(l) > 0);
+    for (const l of emDobro) {
+      const noSistema = doSistema.filter(x => normalizar(x.descricao) === normalizar(l.descricao)).length;
+      ajustes.push({ id: `dobro:${l.id}`, tipo: 'dobro', vendaId, data: l.data, descricao: l.descricao,
+        valorAtual: l.valor, valorNovo: 0, marcado: true,
+        motivo: `Lançado em dobro: a venda tem ${mesmoNome(l)} "${(l.descricao || '').trim()}" no Mercado Phone e o sistema tem ${noSistema}`,
+        apagar: [l.id, ...vinculadas(l).map(s => s.id)], alterar: [] });
+    }
+    const renomeados = new Set();
+    for (const l of doSistema.filter(x => !par.has(x) && !emDobro.includes(x))) {
+      const it = doMP.find(i => !usado.has(i) && !chavesImportadas.has(i._key) && Math.abs(valorCobradoItem(i) - l.valor) <= TOLERANCIA);
+      if (it) { par.set(l, it); usado.add(it); renomeados.add(l); }
+    }
+    const orfaos = doSistema.filter(l => !par.has(l) && !emDobro.includes(l));
+    const novos  = doMP.filter(i => !usado.has(i) && !chavesImportadas.has(i._key));
     if (orfaos.length) {
       const trocado = novos.length > 0;
       ajustes.push({ id: `trocado:${vendaId}`, tipo: trocado ? 'trocado' : 'removido', vendaId, data,
@@ -979,41 +1015,52 @@ async function calcularAjustes(clienteId, inicio, fim) {
     }
 
     for (const l of doSistema) {
-      const it = mpPorChave.get(chaveDe(l));
+      const it = par.get(l);
       if (!it) continue;
       const chave   = it._chave;
       const cobrado = valorCobradoItem(it);
       const liquido = parseFloat(it.valorTotal);
       const custo   = parseFloat(it.valorCusto || 0);
       const cmv     = vinculadas(l).find(s => s.is_cmv);
-      const alterar = [];
-      const motivos = [];
+      const campos    = {};   // da entrada
+      const camposCmv = {};
+      const motivos   = [];
+
+      if (renomeados.has(l)) {
+        const nome = it.aparelhoDescricao || it.tipoProdutoDescricao || '';
+        // Troca também a chave gravada: senão "Buscar no MP" oferece o item de novo como pendente
+        campos.descricao = nome;
+        campos.obs = l.obs.replace(`[MP-${chaveDe(l)}]`, `[MP-${it._key}]`);
+        if (cmv) camposCmv.descricao = `CMV — ${nome}`;
+        motivos.push(`No Mercado Phone o item virou: ${nome}`);
+      }
 
       const bateCobrado = Math.abs(l.valor - cobrado) <= TOLERANCIA;
       // Importações antigas (até set/26) gravavam o valorTotal do MP em qualquer chave: isso não é mudança no MP
       const bateLiquido = !isNaN(liquido) && Math.abs(l.valor - liquido) <= TOLERANCIA;
       if (!bateCobrado && !bateLiquido) {
-        const campos = {};
         if (cobrado === 0) {
           campos.valor = 0; campos.valor_recebido = null;
           if (['Acessórios', 'Outros Produtos'].includes(l.categoria)) { campos.categoria = 'Acessórios'; campos.subcategoria = 'Brindes'; }
           motivos.push('Saiu de brinde (R$ 0) no Mercado Phone');
-          if (cmv && campos.subcategoria === 'Brindes') alterar.push({ id: cmv.id, campos: { subcategoria: 'Brindes' } });
+          if (cmv && campos.subcategoria === 'Brindes') camposCmv.subcategoria = 'Brindes';
         } else {
           // Lançada pelo líquido (financeira) segue pelo líquido; senão vale o cobrado, mantendo a taxa como dedução
           const pelaFinanceira = chave.valor_liquido && l.valor_recebido == null && l.valor < cobrado - TOLERANCIA && liquido > 0;
           campos.valor = Math.round((pelaFinanceira ? liquido : cobrado) * 100) / 100;
           if (l.valor_recebido != null) campos.valor_recebido = chave.valor_liquido && liquido > 0 && liquido < campos.valor ? liquido : null;
-          motivos.push('Valor alterado no Mercado Phone');
+          motivos.push(`Valor diferente do Mercado Phone (${fmtBRL(l.valor)} aqui, ${fmtBRL(campos.valor)} lá)`);
         }
-        alterar.push({ id: l.id, campos });
       }
       if (cmv && custo > 0 && Math.abs(cmv.valor - custo) > TOLERANCIA) {
-        alterar.push({ id: cmv.id, campos: { valor: custo } });
-        motivos.push(`Custo alterado no Mercado Phone (${fmtBRL(cmv.valor)} → ${fmtBRL(custo)})`);
+        camposCmv.valor = custo;
+        motivos.push(`Custo diferente do Mercado Phone (${fmtBRL(cmv.valor)} aqui, ${fmtBRL(custo)} lá)`);
       }
+      const alterar = [];
+      if (Object.keys(campos).length) alterar.push({ id: l.id, campos });
+      if (Object.keys(camposCmv).length) alterar.push({ id: cmv.id, campos: camposCmv });
       if (!alterar.length) continue;
-      const novoValor = alterar.find(a => a.id === l.id)?.campos.valor;
+      const novoValor = campos.valor;
       ajustes.push({ id: `alterado:${l.id}`, tipo: 'alterado', vendaId, data: l.data, descricao: l.descricao,
         valorAtual: l.valor, valorNovo: novoValor ?? l.valor, marcado: true,
         motivo: motivos.join(' · '), apagar: [], alterar });
@@ -1036,7 +1083,7 @@ async function conferir(req, res) {
   }
 }
 
-const CAMPOS_EDITAVEIS = new Set(['valor', 'valor_recebido', 'categoria', 'subcategoria']);
+const CAMPOS_EDITAVEIS = new Set(['valor', 'valor_recebido', 'categoria', 'subcategoria', 'descricao', 'obs']);
 
 async function aplicarConciliacao(req, res) {
   const { clienteId } = req.params;
