@@ -117,11 +117,22 @@ async function callDeepSeek(mensagem, historico, systemPrompt) {
 
 // ---------- orquestrador com fallback ----------
 
-async function callLLM(mensagem, historico, clienteNome, usuarioNome, source, telasLiberadas) {
+// Nome da loja fica no campo obs do cliente (o mesmo que Relatório e Exportar usam como nome da empresa)
+async function identificacaoLoja(clienteId, clienteNome) {
+  try {
+    const { rows: [c] } = await pool.query('SELECT trim(nome) AS nome, trim(obs) AS loja FROM clientes WHERE id = $1', [clienteId]);
+    if (c?.loja) return `Loja: ${c.loja} (responsável: ${c.nome}). Quem fala "${c.loja}" está falando desta loja; chame a loja por esse nome.`;
+    if (c?.nome) return `Nome da loja/empresa: ${c.nome}`;
+  } catch (e) {
+    console.warn('[Agent] nome da loja:', e.message);
+  }
+  return clienteNome ? `Nome da loja/empresa: ${clienteNome}` : '';
+}
+
+async function callLLM(mensagem, historico, clienteId, clienteNome, usuarioNome, source, telasLiberadas) {
   const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source, telasLiberadas, !historico?.length);
-  const systemPrompt = clienteNome
-    ? `${promptBase}\n\nNome da loja/empresa: ${clienteNome}`
-    : promptBase;
+  const loja         = await identificacaoLoja(clienteId, clienteNome);
+  const systemPrompt = loja ? `${promptBase}\n\n${loja}` : promptBase;
 
   try {
     return await callGemini(mensagem, historico, systemPrompt).catch(err => {
@@ -262,7 +273,7 @@ function formatarResultadoConsulta({ rows, quantidade, total }, periodo, tipo) {
 async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard', telasLiberadas = null) {
   console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome, '| source:', source);
 
-  const textoLLM = await callLLM(mensagem, historico, clienteNome, usuarioNome, source, telasLiberadas);
+  const textoLLM = await callLLM(mensagem, historico, clienteId, clienteNome, usuarioNome, source, telasLiberadas);
 
   const parsed = parseResposta(textoLLM);
   const { intent_type, body, data: dados = {} } = parsed;
