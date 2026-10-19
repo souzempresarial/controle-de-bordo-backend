@@ -11,6 +11,9 @@ router.delete('/chaves/:chaveId', ctrl.removerChave);
 router.put('/chave',             ctrl.salvarChave);   // legado
 router.post('/preview',          ctrl.preview);
 router.post('/importar',         ctrl.importar);
+router.post('/conferir',          ctrl.conferir);
+router.post('/conferir/aplicar',  ctrl.aplicarConciliacao);
+router.post('/conferir/desfazer', ctrl.desfazerConciliacao);
 router.post('/os-preview',       ctrl.osPreview);
 router.post('/os-importar',      ctrl.osImportar);
 router.get('/patrimonio/preview',   patrimonio.preview);

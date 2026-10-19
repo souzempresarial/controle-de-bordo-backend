@@ -534,6 +534,8 @@ async function preview(req, res) {
         resumoPagamentos:  ehPrincipal && pagamentos.length ? resumirPagamentos(pagamentos) : '',
         jaImportado:       jaImp,
         possivelDuplicata: !jaImp && valorFinal > 0 && chavesManuais.has(chaveMP),
+        // Pré-venda é venda ainda em aberto (aparelho não entregue, custo provisório): só entra depois de resolvida
+        preVenda:          ehPreVenda(descricao),
         chaveNome:         item._chaveNome || '',
       };
     });
@@ -837,4 +839,276 @@ async function osImportar(req, res) {
   }
 }
 
-module.exports = { status, listarChaves, adicionarChave, salvarChave, configurarChave, removerChave, preview, importar, osPreview, osImportar };
+// ── CONCILIAÇÃO ──────────────────────────────────────────────────────────────
+// A importação é uma foto do MP. Depois dela a loja cancela venda, edita valor/custo, troca o aparelho
+// (ex.: PREVENDA vira o iPhone entregue)... conferir() compara o que já foi importado com o MP de agora
+// e propõe ajustes; aplicarConciliacao() grava e guarda o "antes" de cada linha para desfazer.
+
+const TOLERANCIA = 0.05;
+const ehPreVenda = desc => /pr[eé][\s-]?venda/i.test(desc || '');
+
+// Mesmo valor que a prévia usa (history não traz valorUnitario): cobrado − desconto; 0 = brinde
+function valorCobradoItem(item) {
+  const cobrado = item.valorCliente != null && item.valorCliente !== '' ? item.valorCliente : item.valorTotal;
+  return Math.max(0, parseFloat(cobrado || 0) - parseFloat(item.desconto || 0));
+}
+
+let logPronto = null;
+function garantirLogConciliacao() {
+  logPronto ||= pool.query(`
+    CREATE TABLE IF NOT EXISTS mp_conciliacao_log (
+      id             SERIAL PRIMARY KEY,
+      lote_id        TEXT NOT NULL,
+      cliente_id     INTEGER NOT NULL,
+      acao           TEXT NOT NULL,
+      lancamento_id  INTEGER NOT NULL,
+      antes          JSONB NOT NULL,
+      criado_em      TIMESTAMPTZ DEFAULT NOW(),
+      desfeito_em    TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS mp_conciliacao_log_lote ON mp_conciliacao_log (cliente_id, lote_id);
+  `).catch(err => { logPronto = null; throw err; });
+  return logPronto;
+}
+
+async function lerVendasMP(chaves, inicio, fim) {
+  // Venda do último dia às vezes fica registrada com a data do dia seguinte (mesma folga da prévia)
+  const [fy, fm, fd] = fim.split('-').map(Number);
+  const fimMais1 = new Date(fy, fm - 1, fd + 1).toISOString().slice(0, 10);
+  const itens = [];
+  const statusVenda = new Map();
+  for (const chave of chaves) {
+    const brutos = [];
+    for (let page = 1; page <= 20; page++) {
+      const params = new URLSearchParams({ limit: 300, page, dataVendaInicial: inicio, dataVendaFinal: fimMais1 });
+      const resp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
+      if (!resp.ok) {
+        const err = new Error(resp.status === 429
+          ? 'O Mercado Phone está limitando as consultas agora. Aguarde uns segundos e tente de novo.'
+          : `O Mercado Phone não respondeu (${resp.status}). Tente de novo em instantes.`);
+        err.status = 503;
+        throw err;
+      }
+      const body = await resp.json();
+      const doPage = body.items || [];
+      brutos.push(...doPage);
+      if (doPage.length < 300 || (body.total && brutos.length >= body.total)) break;
+    }
+    // Mesma chave da importação, inclusive o "#2", "#3" de produto repetido na mesma venda
+    const ocorrencias = new Map();
+    for (const item of brutos) {
+      statusVenda.set(String(item.vendaId), normalizar(item.statusVenda));
+      if (!vendaConcluida(item)) continue;
+      const base = mpItemKey(item.vendaId, item.aparelhoDescricao || item.tipoProdutoDescricao || '');
+      const ord  = (ocorrencias.get(base) || 0) + 1;
+      ocorrencias.set(base, ord);
+      itens.push({ ...item, _key: ord > 1 ? `${base}#${ord}` : base, _chave: chave });
+    }
+  }
+  return { itens, statusVenda };
+}
+
+async function calcularAjustes(clienteId, inicio, fim) {
+  const chaves = await getApiKeys(clienteId);
+  if (!chaves.length) { const e = new Error('Chave do Mercado Phone não configurada'); e.status = 400; throw e; }
+
+  const { rows: entradas } = await pool.query(
+    `SELECT id, data::text, descricao, valor::float, valor_recebido::float, categoria, subcategoria, obs, grupo_id
+     FROM lancamentos
+     WHERE cliente_id = $1 AND tipo = 'Entrada' AND obs LIKE '[MP-%' AND data BETWEEN $2 AND $3`,
+    [clienteId, inicio, fim]
+  );
+  if (!entradas.length) return [];
+
+  const chaveDe = l => l.obs.slice(4, l.obs.indexOf(']'));
+  const vendaDe = l => chaveDe(l).split(':')[0];
+  const vendaIds = [...new Set(entradas.map(vendaDe))];
+  const { rows: saidas } = await pool.query(
+    `SELECT id, descricao, valor::float, subcategoria, obs, grupo_id, is_cmv
+     FROM lancamentos WHERE cliente_id = $1 AND tipo = 'Saída' AND obs = ANY($2)`,
+    [clienteId, vendaIds.flatMap(v => [`CMV vinculado ao MP-${v}`, `Downgrade vinculado ao MP-${v}`])]
+  );
+  // CMV/downgrade gravados junto com a entrada: mesmo grupo e descrição "CMV — <descrição da entrada>"
+  const vinculadas = l => saidas.filter(s =>
+    s.obs.endsWith(`MP-${vendaDe(l)}`) && s.grupo_id === l.grupo_id &&
+    (s.descricao === `CMV — ${l.descricao || ''}` || s.descricao === `Downgrade — ${l.descricao || ''}`));
+
+  const { itens, statusVenda } = await lerVendasMP(chaves, inicio, fim);
+  const mpPorChave = new Map(itens.map(i => [i._key, i]));
+  const chavesImportadas = new Set(entradas.map(chaveDe));
+
+  const ajustes = [];
+  const porVenda = new Map();
+  for (const l of entradas) { const v = vendaDe(l); if (!porVenda.has(v)) porVenda.set(v, []); porVenda.get(v).push(l); }
+
+  for (const [vendaId, doSistema] of porVenda) {
+    const st    = statusVenda.get(vendaId);
+    const data  = doSistema[0].data;
+    const desc  = doSistema.map(l => l.descricao).join(' + ');
+    const soma  = doSistema.reduce((a, l) => a + l.valor, 0);
+    const apagarTudo = () => doSistema.flatMap(l => [l.id, ...vinculadas(l).map(s => s.id)]);
+
+    if (st && st !== 'concluido') {
+      ajustes.push({ id: `cancelada:${vendaId}`, tipo: 'cancelada', vendaId, data, descricao: desc,
+        valorAtual: soma, valorNovo: 0, marcado: true,
+        motivo: st === 'orcamento' ? 'Virou orçamento no Mercado Phone' : 'Venda cancelada no Mercado Phone',
+        apagar: apagarTudo(), alterar: [] });
+      continue;
+    }
+    if (!st) {
+      ajustes.push({ id: `sumiu:${vendaId}`, tipo: 'sumiu', vendaId, data, descricao: desc,
+        valorAtual: soma, valorNovo: 0, marcado: false,
+        motivo: 'Não achei essa venda no Mercado Phone neste período (pode ter mudado de data ou sido apagada)',
+        apagar: apagarTudo(), alterar: [] });
+      continue;
+    }
+
+    const doMP   = itens.filter(i => String(i.vendaId) === vendaId);
+    const orfaos = doSistema.filter(l => !mpPorChave.has(chaveDe(l)));
+    const novos  = doMP.filter(i => !chavesImportadas.has(i._key));
+    if (orfaos.length) {
+      const trocado = novos.length > 0;
+      ajustes.push({ id: `trocado:${vendaId}`, tipo: trocado ? 'trocado' : 'removido', vendaId, data,
+        descricao: orfaos.map(l => l.descricao).join(' + '),
+        valorAtual: orfaos.reduce((a, l) => a + l.valor, 0),
+        valorNovo: trocado ? novos.reduce((a, i) => a + valorCobradoItem(i), 0) : 0, marcado: true,
+        motivo: trocado
+          ? `No Mercado Phone o item virou: ${novos.map(i => i.aparelhoDescricao || i.tipoProdutoDescricao).join(' + ')}. Depois de corrigir, importe o item novo em "Buscar no MP"`
+          : 'Item tirado da venda no Mercado Phone',
+        apagar: orfaos.flatMap(l => [l.id, ...vinculadas(l).map(s => s.id)]), alterar: [] });
+    }
+
+    for (const l of doSistema) {
+      const it = mpPorChave.get(chaveDe(l));
+      if (!it) continue;
+      const chave   = it._chave;
+      const cobrado = valorCobradoItem(it);
+      const liquido = parseFloat(it.valorTotal);
+      const custo   = parseFloat(it.valorCusto || 0);
+      const cmv     = vinculadas(l).find(s => s.is_cmv);
+      const alterar = [];
+      const motivos = [];
+
+      const bateCobrado = Math.abs(l.valor - cobrado) <= TOLERANCIA;
+      // Importações antigas (até set/26) gravavam o valorTotal do MP em qualquer chave: isso não é mudança no MP
+      const bateLiquido = !isNaN(liquido) && Math.abs(l.valor - liquido) <= TOLERANCIA;
+      if (!bateCobrado && !bateLiquido) {
+        const campos = {};
+        if (cobrado === 0) {
+          campos.valor = 0; campos.valor_recebido = null;
+          if (['Acessórios', 'Outros Produtos'].includes(l.categoria)) { campos.categoria = 'Acessórios'; campos.subcategoria = 'Brindes'; }
+          motivos.push('Saiu de brinde (R$ 0) no Mercado Phone');
+          if (cmv && campos.subcategoria === 'Brindes') alterar.push({ id: cmv.id, campos: { subcategoria: 'Brindes' } });
+        } else {
+          // Lançada pelo líquido (financeira) segue pelo líquido; senão vale o cobrado, mantendo a taxa como dedução
+          const pelaFinanceira = chave.valor_liquido && l.valor_recebido == null && l.valor < cobrado - TOLERANCIA && liquido > 0;
+          campos.valor = Math.round((pelaFinanceira ? liquido : cobrado) * 100) / 100;
+          if (l.valor_recebido != null) campos.valor_recebido = chave.valor_liquido && liquido > 0 && liquido < campos.valor ? liquido : null;
+          motivos.push('Valor alterado no Mercado Phone');
+        }
+        alterar.push({ id: l.id, campos });
+      }
+      if (cmv && custo > 0 && Math.abs(cmv.valor - custo) > TOLERANCIA) {
+        alterar.push({ id: cmv.id, campos: { valor: custo } });
+        motivos.push(`Custo alterado no Mercado Phone (${fmtBRL(cmv.valor)} → ${fmtBRL(custo)})`);
+      }
+      if (!alterar.length) continue;
+      const novoValor = alterar.find(a => a.id === l.id)?.campos.valor;
+      ajustes.push({ id: `alterado:${l.id}`, tipo: 'alterado', vendaId, data: l.data, descricao: l.descricao,
+        valorAtual: l.valor, valorNovo: novoValor ?? l.valor, marcado: true,
+        motivo: motivos.join(' · '), apagar: [], alterar });
+    }
+  }
+  return ajustes.sort((a, b) => a.data.localeCompare(b.data));
+}
+
+async function conferir(req, res) {
+  try {
+    const { clienteId } = req.params;
+    const { dataInicio, dataFim } = req.body;
+    if (!dataInicio || !dataFim) return res.status(400).json({ erro: 'Informe o período' });
+    const ajustes = await calcularAjustes(clienteId, dataInicio, dataFim);
+    // O que vai pro navegador é só pra mostrar; aplicar recalcula no servidor
+    res.json({ ajustes: ajustes.map(({ apagar, alterar, ...a }) => ({ ...a, linhasApagadas: apagar.length, linhasAlteradas: alterar.length })) });
+  } catch (err) {
+    console.error('[MP conferir]', err.message);
+    res.status(err.status || 500).json({ erro: err.message || 'Erro interno' });
+  }
+}
+
+const CAMPOS_EDITAVEIS = new Set(['valor', 'valor_recebido', 'categoria', 'subcategoria']);
+
+async function aplicarConciliacao(req, res) {
+  const { clienteId } = req.params;
+  const { dataInicio, dataFim, ids } = req.body;
+  if (!dataInicio || !dataFim || !ids?.length) return res.status(400).json({ erro: 'Nada para corrigir' });
+  let client;
+  try {
+    await garantirLogConciliacao();
+    // Recalcula agora: aplica só o que ainda é diferente no MP (não confia na lista que veio da tela)
+    const escolhidos = (await calcularAjustes(clienteId, dataInicio, dataFim)).filter(a => ids.includes(a.id));
+    if (!escolhidos.length) return res.json({ aplicados: 0 });
+
+    const loteId = `c${Date.now()}`;
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const guardar = (acao, id) => client.query(
+      `INSERT INTO mp_conciliacao_log (lote_id, cliente_id, acao, lancamento_id, antes)
+       SELECT $1, $2, $3, id, to_jsonb(l) FROM lancamentos l WHERE id = $4 AND cliente_id = $2`,
+      [loteId, clienteId, acao, id]);
+
+    for (const a of escolhidos) {
+      for (const id of a.apagar) {
+        await guardar('apagado', id);
+        await client.query('DELETE FROM lancamentos WHERE id = $1 AND cliente_id = $2', [id, clienteId]);
+      }
+      for (const { id, campos } of a.alterar) {
+        const cols = Object.keys(campos).filter(c => CAMPOS_EDITAVEIS.has(c));
+        if (!cols.length) continue;
+        await guardar('alterado', id);
+        await client.query(
+          `UPDATE lancamentos SET ${cols.map((c, i) => `${c} = $${i + 3}`).join(', ')} WHERE id = $1 AND cliente_id = $2`,
+          [id, clienteId, ...cols.map(c => campos[c])]);
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ aplicados: escolhidos.length, loteId });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('[MP aplicarConciliacao]', err.message);
+    res.status(err.status || 500).json({ erro: err.message || 'Erro interno' });
+  } finally {
+    client?.release();
+  }
+}
+
+async function desfazerConciliacao(req, res) {
+  const { clienteId } = req.params;
+  const { loteId } = req.body;
+  if (!loteId) return res.status(400).json({ erro: 'Informe o lote' });
+  let client;
+  try {
+    await garantirLogConciliacao();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT id, lancamento_id, antes FROM mp_conciliacao_log WHERE cliente_id = $1 AND lote_id = $2 AND desfeito_em IS NULL ORDER BY id DESC',
+      [clienteId, loteId]);
+    // Volta cada linha exatamente como estava (mesmo id), tanto as apagadas quanto as alteradas
+    for (const r of rows) {
+      await client.query('DELETE FROM lancamentos WHERE id = $1 AND cliente_id = $2', [r.lancamento_id, clienteId]);
+      await client.query('INSERT INTO lancamentos SELECT * FROM jsonb_populate_record(NULL::lancamentos, $1)', [r.antes]);
+    }
+    await client.query('UPDATE mp_conciliacao_log SET desfeito_em = NOW() WHERE cliente_id = $1 AND lote_id = $2', [clienteId, loteId]);
+    await client.query('COMMIT');
+    res.json({ desfeitos: rows.length });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('[MP desfazerConciliacao]', err.message);
+    res.status(500).json({ erro: err.message || 'Erro interno' });
+  } finally {
+    client?.release();
+  }
+}
+
+module.exports = { status, listarChaves, adicionarChave, salvarChave, configurarChave, removerChave, preview, importar, osPreview, osImportar, conferir, aplicarConciliacao, desfazerConciliacao };
