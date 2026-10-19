@@ -4,11 +4,16 @@ const redis = require('../services/redis');
 const MP_BASE  = 'https://platform.mercadophone.tech/api/v1';
 const CACHE_TTL = 300; // 5 minutos
 
-function mpFetch(url, apiKey, timeoutMs = 30000) {
+// O MP limita as consultas (429 "aguarde Ns"): espera o tempo pedido e tenta de novo, até 2 vezes
+async function mpFetch(url, apiKey, timeoutMs = 30000, tentativas = 2) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  return fetch(url, { headers: { 'X-API-Key': apiKey }, signal: ctrl.signal })
-    .finally(() => clearTimeout(timer));
+  const resp = await fetch(url, { headers: { 'X-API-Key': apiKey }, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  if (resp.status !== 429 || tentativas <= 0) return resp;
+  const corpo = await resp.clone().json().catch(() => ({}));
+  const segundos = Math.min(6, parseInt((String(corpo.detail || '').match(/(\d+)\s*s/) || [])[1]) || 4);
+  await new Promise(r => setTimeout(r, segundos * 1000 + 300));
+  return mpFetch(url, apiKey, timeoutMs, tentativas - 1);
 }
 
 async function getApiKeys(clienteId) {
@@ -352,7 +357,10 @@ async function preview(req, res) {
             if (!mpResp.ok) {
               const err = await mpResp.json().catch(() => ({}));
               console.error(`[MP preview] chave ${chave.id} página ${page} erro:`, err.detail || mpResp.status);
-              break;
+              // Lista incompleta faz venda "sumir" da importação: melhor avisar do que mostrar parte
+              return res.status(503).json({ erro: mpResp.status === 429
+                ? 'O Mercado Phone está limitando as consultas agora. Aguarde uns segundos e clique em Buscar de novo.'
+                : `O Mercado Phone não respondeu (${mpResp.status}). Tente de novo em instantes.` });
             }
             const body   = await mpResp.json();
             const doPage = body.items || [];
@@ -360,13 +368,19 @@ async function preview(req, res) {
             if (doPage.length < LIMIT || (body.total && rawItems.length >= body.total)) break;
           }
 
+          // Mesmo produto repetido na mesma venda (ex.: 2 MacBooks iguais) não tem id próprio na API:
+          // a 1ª ocorrência fica com a chave base e as seguintes ganham "#2", "#3"… na ordem da API
+          const ocorrencias = new Map();
           for (const item of rawItems) {
             // Só venda concluída: a API também devolve 'cancelada' e 'orcamento' (orçamento não é venda)
             if (!vendaConcluida(item)) continue;
             if (dataFim && (item.dataVenda || '').slice(0, 10) > dataFim) continue;
 
             const desc = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
-            const key  = mpItemKey(item.vendaId, desc);
+            const base = mpItemKey(item.vendaId, desc);
+            const ord  = (ocorrencias.get(base) || 0) + 1;
+            ocorrencias.set(base, ord);
+            const key  = ord > 1 ? `${base}#${ord}` : base;
             if (!itemsMap.has(key)) {
               itemsMap.set(key, { ...item, _chaveNome: chave.nome, _chaveId: chave.id, _mpItemKey: key });
             }
@@ -412,7 +426,9 @@ async function preview(req, res) {
       const qty      = parseInt(item.quantidade || 1);
       // valorUnitario × qty = faturamento real (coincide com relatório do MP)
       const valUnit  = parseFloat(item.valorUnitario ?? NaN);
-      const bruto    = !isNaN(valUnit) ? valUnit * qty : parseFloat(item.valorCliente || item.valorTotal || 0);
+      // valorCliente 0 = item saiu de graça (brinde); o valorTotal nesse caso é o preço de tabela, não o cobrado
+      const cobrado  = item.valorCliente != null && item.valorCliente !== '' ? item.valorCliente : item.valorTotal;
+      const bruto    = !isNaN(valUnit) ? valUnit * qty : parseFloat(cobrado || 0);
       return Math.max(0, bruto - parseFloat(item.desconto || 0));
     }
     const keyDoItem = item => item._mpItemKey || mpItemKey(item.vendaId, item.aparelhoDescricao || item.tipoProdutoDescricao || '');
