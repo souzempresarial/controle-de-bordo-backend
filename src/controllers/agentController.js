@@ -76,7 +76,7 @@ async function transcrever(req, res) {
     if (!audio || typeof audio !== 'string') return res.status(400).json({ erro: 'Áudio não enviado' });
     if (audio.length > AUDIO_MAX_BASE64) return res.status(413).json({ erro: 'Áudio muito longo. Grave até 1 minuto.' });
     if (mimeType && !/^audio\//.test(mimeType)) return res.status(400).json({ erro: 'Formato de áudio inválido' });
-    const texto = await transcreverAudio(audio, mimeType);
+    const texto = await transcreverAudio(audio, mimeType, req.params.clienteId);
     res.json({ texto });
   } catch (err) {
     console.error('[Agent] Erro ao transcrever:', err.message);

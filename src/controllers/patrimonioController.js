@@ -3,7 +3,8 @@ const redis = require('../services/redis');
 
 const MP_BASE       = 'https://platform.mercadophone.tech/api/v1';
 const CACHE_TTL     = 300;
-const MAX_PAGINAS   = 15;   // 15 × 300 = 4.500 produtos por loja
+const MAX_PAGINAS   = 60;   // 60 × 300 = 18.000 produtos por loja (a MR Celular já passa de 6 mil)
+const LOTE_PAGINAS  = 4;    // páginas lidas ao mesmo tempo: rápido sem esbarrar no limite de consultas do MP
 const MESES_VENDAS  = 3;    // janela para achar aparelho vendido sem baixa
 const QTD_ALTA      = 50;
 
@@ -14,12 +15,36 @@ const DESTINOS = {
   manutencao: 'cap_manutencao',
 };
 
-function mpFetch(path, apiKey) {
+// 429 = o MP pediu para esperar: espera e tenta de novo (até 2 vezes)
+async function mpFetch(path, apiKey, tentativas = 2) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
-  return fetch(MP_BASE + path, { headers: { 'X-API-Key': apiKey }, signal: ctrl.signal })
-    .then(r => (r.ok ? r.json() : Promise.reject(new Error(`Mercado Phone respondeu ${r.status}`))))
-    .finally(() => clearTimeout(timer));
+  const r = await fetch(MP_BASE + path, { headers: { 'X-API-Key': apiKey }, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  if (r.status === 429 && tentativas > 0) {
+    await new Promise(ok => setTimeout(ok, 4300));
+    return mpFetch(path, apiKey, tentativas - 1);
+  }
+  if (!r.ok) throw new Error(`Mercado Phone respondeu ${r.status}`);
+  return r.json();
+}
+
+// Busca as páginas em lotes paralelos. No estoque o "total" da 1ª página diz quantas páginas existem;
+// no histórico de vendas o total ignora o filtro de data (dá o da conta inteira), então lá só vale
+// parar quando uma página vem incompleta
+async function lerPaginado(montarPath, apiKey, maxPaginas, { confiarTotal = true, porPagina = 300 } = {}) {
+  const primeira = await mpFetch(montarPath(1), apiKey);
+  const itens = [...(primeira.items || [])];
+  const total = primeira.total || itens.length;
+  if ((primeira.items || []).length < porPagina) return { itens, total, completo: true };
+  const paginas = confiarTotal ? Math.min(maxPaginas, Math.ceil(total / porPagina)) : maxPaginas;
+  for (let p = 2; p <= paginas; p += LOTE_PAGINAS) {
+    const lote = [];
+    for (let q = p; q < p + LOTE_PAGINAS && q <= paginas; q++) lote.push(mpFetch(montarPath(q), apiKey));
+    const respostas = await Promise.all(lote);
+    for (const b of respostas) itens.push(...(b.items || []));
+    if (respostas.some(b => (b.items || []).length < porPagina)) return { itens, total, completo: true };
+  }
+  return { itens, total, completo: confiarTotal ? itens.length >= total : false };
 }
 
 const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
@@ -47,12 +72,8 @@ function limparDescricao(item) {
 }
 
 async function lerEstoque(apiKey) {
-  const itens = [];
-  for (let page = 1; page <= MAX_PAGINAS; page++) {
-    const b = await mpFetch(`/inventory?limit=300&page=${page}`, apiKey);
-    itens.push(...(b.items || []));
-    if (!b.items?.length || itens.length >= (b.total || 0)) break;
-  }
+  const { itens, total, completo } = await lerPaginado(p => `/inventory?limit=300&page=${p}`, apiKey, MAX_PAGINAS);
+  if (!completo) console.warn(`[patrimonio] estoque cortado: ${itens.length} de ${total} produtos`);
   return itens.filter(i => !i.excluido);
 }
 
@@ -66,14 +87,9 @@ async function lerVendasPorImei(apiKey) {
   });
   // A API devolve no máximo 300 itens por página: loja grande precisa das páginas seguintes
   const lerMes = async ([ini, fim]) => {
-    const items = [];
-    for (let page = 1; page <= 10; page++) {
-      const b = await mpFetch(`/sales/history?limit=300&page=${page}&dataVendaInicial=${ini}&dataVendaFinal=${fim}`, apiKey).catch(() => null);
-      if (!b) break;
-      items.push(...(b.items || []));
-      if ((b.items || []).length < 300 || (b.total && items.length >= b.total)) break;
-    }
-    return { items };
+    // Sem as vendas o filtro de "vendido sem baixa" só perde força; o estoque continua saindo
+    const r = await lerPaginado(p => `/sales/history?limit=300&page=${p}&dataVendaInicial=${ini}&dataVendaFinal=${fim}`, apiKey, 10, { confiarTotal: false }).catch(() => null);
+    return { items: r?.itens || [] };
   };
   const respostas = await Promise.all(meses.map(lerMes));
   const vendas = new Map();
@@ -165,7 +181,8 @@ async function preview(req, res) {
     const ordem = { aparelho: 0, acessorio: 1, peca: 2 };
     itens.sort((a, b) => ordem[a.tipo] - ordem[b.tipo] || b.custo * b.quantidade - a.custo * a.quantidade);
     const resposta = { itens, vendidosFora, lojas: chaves.length, geradoEm: new Date().toISOString() };
-    await redis.set(cacheKey, resposta, { ex: CACHE_TTL }).catch(() => {});
+    // O Redis recusa valores acima de ~1 MB (lojas com milhares de produtos): nesse caso só não fica em cache
+    if (JSON.stringify(resposta).length < 900 * 1024) await redis.set(cacheKey, resposta, { ex: CACHE_TTL }).catch(() => {});
     res.json(resposta);
   } catch (err) {
     console.error('[patrimonio.preview]', err.message);

@@ -118,7 +118,7 @@ async function processarEvento(evento) {
       await sender.enviarTexto(telefone, 'Não consegui processar o áudio. Pode enviar em texto?');
       return;
     }
-    mensagem = await transcreverAudio(base64, audioMsg?.mimetype);
+    mensagem = await transcreverAudio(base64, audioMsg?.mimetype, clienteId);
     if (!mensagem) {
       await sender.enviarTexto(telefone, 'Não entendi o áudio. Pode repetir em texto?');
       return;
