@@ -4,6 +4,7 @@ const controller = require('../controllers/agentController');
 
 router.post('/', controller.chat);
 router.get('/historico', controller.historico);
+router.get('/resumo-semana', controller.resumoSemana);
 router.delete('/historico', controller.limpar);
 router.post('/transcrever', controller.transcrever);
 

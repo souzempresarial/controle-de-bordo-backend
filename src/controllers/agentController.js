@@ -84,4 +84,22 @@ async function transcrever(req, res) {
   }
 }
 
-module.exports = { chat, historico, limpar, transcrever };
+// Último resumo semanal da loja (gerado toda segunda) para mostrar no topo do chat
+async function resumoSemana(req, res) {
+  try {
+    const { ultimoResumoSemanal } = require('../services/analyticsService');
+    const r = await ultimoResumoSemanal(req.params.clienteId);
+    if (!r) return res.json({ resumo: null });
+    // periodo '2026W42' → segunda e domingo daquela semana ISO
+    const ano = Number(r.periodo.slice(0, 4)), semana = Number(r.periodo.slice(5));
+    const jan4 = new Date(Date.UTC(ano, 0, 4));
+    const segunda = new Date(jan4); segunda.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7) + (semana - 1) * 7);
+    const domingo = new Date(segunda); domingo.setUTCDate(segunda.getUTCDate() + 6);
+    res.json({ periodo: r.periodo, inicio: segunda.toISOString().slice(0, 10), fim: domingo.toISOString().slice(0, 10), resumo: r.resumo, geradoEm: r.gerado_em });
+  } catch (err) {
+    console.error('[Agent] resumo da semana:', err.message);
+    res.status(500).json({ erro: 'Não consegui carregar o resumo da semana.' });
+  }
+}
+
+module.exports = { chat, historico, limpar, transcrever, resumoSemana };

@@ -322,22 +322,34 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
 
   // ── CONSULTAR ANALYTICS (RAG) ─────────────────────────────────────────────
   if (intent_type === 'consultar_analytics') {
-    const { responderComContexto } = require('./analyticsService');
-    const { dreMensal, textoDRE } = require('./dre');
+    const { responderComContexto, ultimoResumoSemanal } = require('./analyticsService');
+    const { dreMensal, textoDRE, dreSemanal, textoSemana } = require('./dre');
     const pergunta = dados.pergunta || body || mensagem;
     console.log('[Agent][3] Tool: dreMensal | pergunta=%s', pergunta);
 
     // Números calculados na hora com a mesma conta da tela Financeiro; o resumo salvo pelo cron fica velho e usa outra conta
     const hoje  = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const desde = new Date(Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7)) - 13, 1).toLocaleDateString('sv-SE');
-    const meses = await dreMensal(clienteId, desde);
+    // Semanas também calculadas na hora; o resumo escrito da última semana entra como contexto do que já foi dito ao dono
+    const [meses, semanas, resumoSemana] = await Promise.all([
+      dreMensal(clienteId, desde),
+      dreSemanal(clienteId, hoje, 8),
+      ultimoResumoSemanal(clienteId).catch(() => null),
+    ]);
     console.log('[Agent][4] Meses com DRE:', meses.map(m => m.mes).join(','));
 
     if (meses.length === 0) {
       return { resposta: 'Ainda não há lançamentos suficientes nesta conta para analisar os resultados.', acao: null };
     }
 
-    const resposta = await responderComContexto(pergunta, meses.map(d => textoDRE(d, hoje)).join('\n\n'), source);
+    const contexto = `${meses.map(d => textoDRE(d, hoje)).join('\n\n')}
+
+DRE por semana (segunda a domingo), mesma conta da tela:
+${semanas.map(s => textoSemana(s, hoje)).join('\n')}${resumoSemana ? `
+
+Resumo da semana já enviado ao dono (${resumoSemana.periodo}):
+${resumoSemana.resumo}` : ''}`;
+    const resposta = await responderComContexto(pergunta, contexto, source);
     console.log('[Agent][5] Resposta analytics:', resposta.slice(0, 200));
     return { resposta, acao: null };
   }

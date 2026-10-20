@@ -150,4 +150,46 @@ function textoDetalhe(d) {
   return `\nDetalhe por subcategoria (% dentro do grupo):\n${linhas.join('\n')}${retirada}`;
 }
 
-module.exports = { calcDREBase, dreMensal, textoDRE };
+// ── Semanas (segunda a domingo) ──────────────────────────────────────────────
+const iso = d => d.toISOString().slice(0, 10);
+const somaDias = (dataISO, n) => { const d = new Date(`${dataISO}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+function segundaDa(dataISO) {
+  const d = new Date(`${dataISO}T12:00:00Z`);
+  return somaDias(dataISO, -((d.getUTCDay() + 6) % 7));
+}
+// Chave ISO da semana para guardar o resumo (periodo é CHAR(7)): '2026W43'
+function chaveSemana(segundaISO) {
+  const d = new Date(`${somaDias(segundaISO, 3)}T12:00:00Z`); // a quinta-feira define o ano ISO
+  const ano = d.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(ano, 0, 4, 12));
+  const semana = 1 + Math.round((d - jan4) / 864e5 / 7 + ((jan4.getUTCDay() + 6) % 7) / 7 - 3 / 7);
+  return `${ano}W${String(semana).padStart(2, '0')}`;
+}
+
+// DRE das últimas `quantas` semanas até a que contém `hojeISO`, com a mesma conta da tela (sem depreciação/IRPJ, que são mensais)
+async function dreSemanal(clienteId, hojeISO, quantas = 8) {
+  const atual = segundaDa(hojeISO);
+  const desde = somaDias(atual, -7 * (quantas - 1));
+  const { rows } = await pool.query('SELECT * FROM lancamentos WHERE cliente_id = $1 AND data >= $2 AND data <= $3', [clienteId, desde, somaDias(atual, 6)]);
+  const lancs = rows.map(normalizar);
+  const semanas = [];
+  for (let i = 0; i < quantas; i++) {
+    const inicio = somaDias(desde, 7 * i);
+    const fim    = somaDias(inicio, 6);
+    const lm     = lancs.filter(l => l.data >= inicio && l.data <= fim);
+    const base   = calcDREBase(lm);
+    const resultado = base.ebitda + base.resFin;
+    // lucroLiq = resultado: o textoDetalhe compara a retirada dos sócios com ele
+    semanas.push({ inicio, fim, chave: chaveSemana(inicio), vendas: lm.filter(l => l.tipo === 'Entrada').length, ...base, resultado, lucroLiq: resultado, detalhe: detalheSubcategorias(lm) });
+  }
+  return semanas;
+}
+
+const dm = dataISO => `${dataISO.slice(8, 10)}/${dataISO.slice(5, 7)}`;
+function textoSemana(s, hojeISO) {
+  const parcial = hojeISO >= s.inicio && hojeISO <= s.fim ? ` (em andamento, até ${dm(hojeISO)})` : '';
+  if (!s.vendas && !s.sga && !s.cmvTotal) return `[Semana ${dm(s.inicio)} a ${dm(s.fim)}${parcial}] sem lançamentos`;
+  return `[Semana ${dm(s.inicio)} a ${dm(s.fim)}${parcial}] Receita Bruta ${brl(s.recBruta)} · Deduções ${brl(s.deducoes)} · CMV ${brl(s.cmvTotal)} · Lucro Bruto ${brl(s.lucroBruto)} (margem ${pct(s.lucroBruto, s.recBruta)}) · Custos Var. Indiretos ${brl(s.custosVarInd)} · SG&A ${brl(s.sga)} · Resultado ${brl(s.resultado)}`;
+}
+
+module.exports = { calcDREBase, dreMensal, textoDRE, dreSemanal, textoSemana, textoDetalhe, segundaDa, somaDias, chaveSemana };

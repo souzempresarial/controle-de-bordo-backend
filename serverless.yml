@@ -57,6 +57,11 @@ functions:
 
   analytics:
     handler: analyticsHandler.gerarAnalytics
-    timeout: 300
+    timeout: 900  # resumos de todas as lojas: ~3,5 min hoje, cresce com cada loja nova
     events:
-      - schedule: cron(0 5 1 * ? *)  # 02:00 BRT (05:00 UTC) no dia 1 de cada mês
+      - schedule:
+          rate: cron(0 5 1 * ? *)    # 02:00 BRT (05:00 UTC) no dia 1 de cada mês
+          input: { tipo: mensal }
+      - schedule:
+          rate: cron(0 10 ? * MON *) # 07:00 BRT (10:00 UTC) toda segunda: semana passada + meses refeitos
+          input: { tipo: semanal }

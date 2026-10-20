@@ -16,67 +16,43 @@ function periodoLabel(periodo) {
   return `${nomes[Number(m) - 1]} de ${y}`;
 }
 
-function agrupar(rows, campo) {
-  const grupos = {};
-  for (const r of rows) {
-    const k = r[campo] || 'Outro';
-    grupos[k] = (grupos[k] || 0) + parseFloat(r.valor);
-  }
-  return Object.entries(grupos)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([k, v]) => `${k}: R$ ${v.toFixed(2)}`)
-    .join(', ');
-}
+const hojeBR = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+const brl    = v => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const dm     = dataISO => `${dataISO.slice(8, 10)}/${dataISO.slice(5, 7)}`;
 
-// ---------- buscar transações do mês ----------
-
-async function buscarTransacoesMes(clienteId, periodo) {
-  const [y, m] = periodo.split('-');
-  const start  = `${periodo}-01`;
-  const end    = new Date(Number(y), Number(m), 0).toISOString().slice(0, 10);
-
-  const { rows } = await pool.query(
-    `SELECT tipo, valor, categoria, subcategoria, descricao, data
-     FROM lancamentos
-     WHERE cliente_id = $1 AND status = 'Confirmado' AND COALESCE(is_cmv, false) = false
-       AND data >= $2 AND data <= $3
-     ORDER BY data`,
-    [clienteId, start, end]
-  );
-  return rows;
-}
-
-// ---------- gerar resumo com Gemini ----------
-
-async function gerarResumo(transacoes, periodo) {
-  const entradas = transacoes.filter(t => t.tipo === 'Entrada');
-  const saidas   = transacoes.filter(t => t.tipo === 'Saída');
-
-  const totEnt = entradas.reduce((s, t) => s + parseFloat(t.valor), 0);
-  const totSai = saidas.reduce((s, t) => s + parseFloat(t.valor), 0);
-  const saldo  = totEnt - totSai;
-
-  const prompt = `Gere um resumo financeiro objetivo em português para ${periodoLabel(periodo)}.
-
-Dados do período:
-- Faturamento total: R$ ${totEnt.toFixed(2)} (${entradas.length} entradas)
-- Top categorias de entrada: ${agrupar(entradas, 'categoria') || 'nenhuma'}
-- Gastos totais: R$ ${totSai.toFixed(2)} (${saidas.length} saídas)
-- Top categorias de saída: ${agrupar(saidas, 'categoria') || 'nenhuma'}
-- Resultado: R$ ${saldo.toFixed(2)} (${saldo >= 0 ? 'positivo' : 'negativo'})
-
-Escreva 2-3 frases resumindo o desempenho financeiro. Mencione: faturamento, principal categoria de receita, principais custos e resultado. Seja direto e use os valores reais.`;
-
+async function gerarTexto(prompt) {
   const result = await genAI.models.generateContent({
     model: CHAT_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { temperature: 0.3 },
   });
-
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? result.text;
   if (!text) throw new Error('Gemini não retornou resumo');
   return text.trim();
+}
+
+async function salvarResumo(clienteId, periodo, resumo) {
+  // Sem o embedding o resumo continua útil (o chat lê pelo período); só a busca por similaridade fica sem ele
+  let embedding = null;
+  try { embedding = JSON.stringify(await gerarEmbedding(resumo)); }
+  catch (e) { console.warn('[Analytics] Embedding falhou:', e.message); }
+  await pool.query(
+    `INSERT INTO analytics_embeddings (cliente_id, periodo, resumo, embedding)
+     VALUES ($1, $2, $3, $4::vector)
+     ON CONFLICT (cliente_id, periodo)
+     DO UPDATE SET resumo = EXCLUDED.resumo, embedding = EXCLUDED.embedding, gerado_em = NOW()`,
+    [clienteId, periodo, resumo, embedding]
+  );
+}
+
+async function contasDaSemana(clienteId, inicio, fim) {
+  const { rows } = await pool.query(
+    `SELECT vencimento::text AS data, valor::float, COALESCE(NULLIF(descricao, ''), subcategoria, categoria) AS nome
+     FROM contas WHERE cliente_id = $1 AND tipo = 'pagar' AND status = 'pendente' AND vencimento BETWEEN $2 AND $3
+     ORDER BY vencimento`,
+    [clienteId, inicio, fim]
+  );
+  return rows;
 }
 
 // ---------- embedding ----------
@@ -97,27 +73,76 @@ async function gerarEmbedding(texto) {
 
 // ---------- API pública ----------
 
+// Resumo do mês com os números do DRE da tela (mesma conta do chat); refeito toda semana enquanto o mês ainda recebe correções
 async function gerarResumoMensal(clienteId, periodo) {
-  const transacoes = await buscarTransacoesMes(clienteId, periodo);
-  if (transacoes.length === 0) {
-    console.log(`[Analytics] Sem transações para cliente ${clienteId} em ${periodo}`);
+  const { dreMensal, textoDRE } = require('./dre');
+  const [mesAnterior] = new Date(Number(periodo.slice(0, 4)), Number(periodo.slice(5, 7)) - 2, 1).toLocaleDateString('sv-SE').split('T');
+  const meses = await dreMensal(clienteId, mesAnterior.slice(0, 8) + '01');
+  const atual = meses.find(m => m.mes === periodo);
+  if (!atual || !atual.recBruta) {
+    console.log(`[Analytics] Sem faturamento para cliente ${clienteId} em ${periodo}`);
     return null;
   }
+  const anterior = meses.find(m => m.mes < periodo);
+  const hoje = hojeBR();
+  const prompt = `Resuma em português, em 2 a 3 frases objetivas, o resultado de ${periodoLabel(periodo)} de uma loja de celulares.
+Use SOMENTE os números abaixo (DRE oficial do sistema), sem recalcular. Faturamento = Receita Bruta; lucro = Lucro Líquido.
+Cite: faturamento, lucro bruto e margem, o grupo de despesa que mais pesou e o lucro líquido.${anterior ? ' Compare com o mês anterior.' : ''}${hoje.startsWith(periodo) ? ' O mês ainda está em andamento: deixe isso claro.' : ''}
 
-  const resumo    = await gerarResumo(transacoes, periodo);
-  const embedding = await gerarEmbedding(resumo);
-
-  // Salva como string JSON — pg_vector aceita '[0.1,0.2,...]'
-  await pool.query(
-    `INSERT INTO analytics_embeddings (cliente_id, periodo, resumo, embedding)
-     VALUES ($1, $2, $3, $4::vector)
-     ON CONFLICT (cliente_id, periodo)
-     DO UPDATE SET resumo = EXCLUDED.resumo, embedding = EXCLUDED.embedding, gerado_em = NOW()`,
-    [clienteId, periodo, resumo, JSON.stringify(embedding)]
-  );
-
-  console.log(`[Analytics] Resumo salvo — cliente ${clienteId}, ${periodo}: ${resumo.slice(0, 80)}...`);
+${textoDRE(atual, hoje)}${anterior ? `\n\nMês anterior:\n${textoDRE(anterior, hoje)}` : ''}`;
+  const resumo = await gerarTexto(prompt);
+  await salvarResumo(clienteId, periodo, resumo);
+  console.log(`[Analytics] Resumo mensal — cliente ${clienteId}, ${periodo}: ${resumo.slice(0, 80)}...`);
   return resumo;
+}
+
+// Resumo escrito da semana (segunda a domingo) para o dono: o que vendeu, o que sobrou, o que mudou e o que vence
+async function gerarResumoSemanal(clienteId, segundaISO) {
+  const { dreSemanal, textoSemana, textoDetalhe, somaDias } = require('./dre');
+  const domingo = somaDias(segundaISO, 6);
+  const semanas = await dreSemanal(clienteId, domingo, 5);
+  const atual = semanas[semanas.length - 1];
+  if (!atual.vendas && !atual.sga) {
+    console.log(`[Analytics] Sem lançamentos para cliente ${clienteId} na semana ${segundaISO}`);
+    return null;
+  }
+  const anteriores = semanas.slice(0, -1).filter(s => s.vendas);
+  const media = anteriores.length ? anteriores.reduce((a, s) => a + s.recBruta, 0) / anteriores.length : null;
+  const contas = await contasDaSemana(clienteId, somaDias(domingo, 1), somaDias(domingo, 7));
+  const totContas = contas.reduce((a, c) => a + c.valor, 0);
+
+  const prompt = `Escreva o resumo da semana de ${dm(segundaISO)} a ${dm(domingo)} de uma loja de celulares, para o dono ler no sistema.
+Português, tom de alguém da equipe financeira: direto, próximo e profissional. Sem cumprimentar, sem chamar pelo nome, sem títulos com #.
+Use SOMENTE os números abaixo (DRE oficial do sistema, mesma conta da tela), sem recalcular.
+
+Formato (no máximo 8 linhas):
+- 1ª linha: faturamento da semana e resultado (lucro ou prejuízo), comparando com a semana anterior${media != null ? ' e com a média das semanas anteriores' : ''}.
+- Depois, em "- " itens curtos: margem bruta, a despesa que mais pesou (use o detalhe por subcategoria) e qualquer variação forte.
+- Se houver contas a pagar na próxima semana, uma linha com o total e as maiores.
+- Feche com 1 ponto de atenção prático ligado a um número.
+Lançamentos às vezes entram com atraso: se a semana estiver muito abaixo das outras, diga que pode faltar lançamento em vez de afirmar queda.
+
+Semana do resumo:
+${textoSemana(atual, domingo)}${textoDetalhe(atual)}
+
+Semanas anteriores:
+${semanas.slice(0, -1).map(s => textoSemana(s, domingo)).join('\n')}${media != null ? `\nMédia de faturamento das semanas anteriores com venda: ${brl(media)}` : ''}
+
+Contas a pagar de ${dm(somaDias(domingo, 1))} a ${dm(somaDias(domingo, 7))}: ${contas.length ? `${contas.length} conta(s), total ${brl(totContas)} — ${contas.slice(0, 5).map(c => `${c.nome} ${brl(c.valor)} (${dm(c.data)})`).join('; ')}` : 'nenhuma cadastrada'}`;
+
+  const resumo = await gerarTexto(prompt);
+  await salvarResumo(clienteId, atual.chave, resumo);
+  console.log(`[Analytics] Resumo semanal — cliente ${clienteId}, ${atual.chave}: ${resumo.slice(0, 80)}...`);
+  return { periodo: atual.chave, inicio: segundaISO, fim: domingo, resumo };
+}
+
+async function ultimoResumoSemanal(clienteId) {
+  const { rows: [r] } = await pool.query(
+    `SELECT periodo, resumo, gerado_em FROM analytics_embeddings
+     WHERE cliente_id = $1 AND periodo LIKE '____W__' ORDER BY periodo DESC LIMIT 1`,
+    [clienteId]
+  );
+  return r || null;
 }
 
 async function buscarAnalytics(clienteId, pergunta) {
@@ -144,12 +169,14 @@ async function responderComContexto(pergunta, contexto, source = 'dashboard') {
   const prompt = `Você é a SOUZ, consultora financeira de lojistas de celular. Responda em português, de forma direta.
 Esta resposta continua uma conversa que já está acontecendo: não cumprimente, não se apresente e não chame a pessoa pelo nome. Fale como alguém da equipe que entende de finanças — natural e próxima, mas profissional, sem gírias e sem bajulação.
 
-Os números abaixo são o DRE oficial de cada mês, os mesmos da tela Financeiro do sistema, calculados agora.
+Os números abaixo são o DRE oficial de cada mês e de cada semana (segunda a domingo), com a mesma conta da tela Financeiro do sistema, calculados agora.
 
 Como responder:
 - Responda exatamente o que foi perguntado. Pergunta de número (ex: "qual foi meu faturamento?") se responde com o número e, no máximo, uma frase de contexto — sem lista de conselhos.
 - Números: use SOMENTE os valores abaixo, sem recalcular nem arredondar. Faturamento = Receita Bruta. Resultado ou lucro do mês = Lucro Líquido. "Caixa do mês" é dinheiro que entrou e saiu da conta, não é lucro — só use se perguntarem de caixa. Se perguntarem de um mês que não está abaixo, diga que não há lançamentos nele.
 - Mês marcado como parcial ainda está em andamento: avise isso ao comparar com meses fechados.
+- Pergunta sobre semana ("essa semana", "semana passada", "últimas semanas") se responde pelo bloco "DRE por semana". Na semana, o lucro é o "Resultado" (não tem depreciação nem IRPJ, que são do mês). Semana "em andamento" está incompleta: avise ao comparar.
+- Lançamento costuma entrar com alguns dias de atraso: semana muito abaixo das outras pode ser falta de lançamento, não queda real. Diga isso quando for o caso, sem afirmar queda.
 - Só quando a pessoa pedir conselho, recomendação, análise ou próximos passos: analise os números (margens, peso de cada despesa, comparação entre meses, o que cresceu ou caiu) e dê de 2 a 4 ações práticas e específicas para a loja, cada uma ligada a um número. Não responda que "não há dados suficientes" para recomendar — recomende com base no que existe.
   - Use o "Detalhe por subcategoria": ao falar de um grupo de despesa, diga qual subcategoria pesa mais dentro dele (ex: "Pessoal R$ 22 mil, sendo metade pró-labore"), em vez de citar só o total do grupo.
   - Compare sempre a retirada dos sócios (pró-labore) com o lucro: se a retirada for maior que o lucro líquido, ou o mês fechou no prejuízo com retirada alta, isso é um dos pontos principais da análise — os sócios estão tirando mais do que a loja gera.
@@ -160,6 +187,7 @@ Pergunta: ${pergunta}
 
 DRE por mês:
 ${contexto}`;
+
 
   // Roda dentro do chat: API Gateway corta em 29s e o agente já gastou parte disso
   const inicio = Date.now();
@@ -186,4 +214,4 @@ ${contexto}`;
   }
 }
 
-module.exports = { gerarResumoMensal, buscarAnalytics, responderComContexto };
+module.exports = { gerarResumoMensal, gerarResumoSemanal, ultimoResumoSemanal, buscarAnalytics, responderComContexto };
