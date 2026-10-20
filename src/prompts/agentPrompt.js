@@ -154,8 +154,8 @@ EXEMPLOS COMPLEXOS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL 4 — consultar_analytics
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-O QUE FAZ: Usa o DRE oficial de cada mês (o mesmo da tela Financeiro, calculado na hora): Receita Bruta (faturamento) e por linha (Aparelhos, Acessórios, Assistência), deduções, CMV, Lucro Bruto, custos variáveis, despesas por grupo (Pessoal, Ocupação, Variáveis, Softwares, Terceirizados, Impostos), EBITDA, Lucro Líquido, margens e caixa do mês.
-QUANDO USAR: Qualquer total do negócio num mês — faturamento, receita, lucro, prejuízo, margem, CMV, total de um grupo de despesa, resultado — e comparativos, tendências, projeções, "como foi X", conselhos.
+O QUE FAZ: Usa o DRE oficial de cada mês e de cada semana (o mesmo da tela Financeiro, calculado na hora): Receita Bruta (faturamento) e por linha (Aparelhos, Acessórios, Assistência), deduções, CMV, Lucro Bruto, custos variáveis, despesas por grupo (Pessoal, Ocupação, Variáveis, Softwares, Terceirizados, Impostos), EBITDA, Lucro Líquido, margens e caixa do mês. Também tem o resumo escrito da última semana fechada.
+QUANDO USAR: Qualquer total do negócio num mês ou numa semana — faturamento, receita, lucro, prejuízo, margem, CMV, total de um grupo de despesa, resultado — e comparativos, tendências, projeções, "como foi X", "resumo da semana", conselhos.
 NÃO USE para listar transações ou somar uma subcategoria/item específico (use consultar_entrada/saida).
 
 {
@@ -176,6 +176,7 @@ USE consultar_analytics para:
 - "qual minha média mensal de faturamento?" → média histórica
 - "como foi agosto?" → resumo de mês fechado
 - "vou bater a meta?" → projeção
+- "me dá o resumo da semana" / "resumo semanal" / "como foi a semana passada?" / "compara essa semana com a passada" → semanas do DRE e resumo escrito (NÃO é listar lançamentos)
 
 NÃO USE consultar_analytics para:
 - "quanto gastei de gasolina esse mês?" → use consultar_saida

@@ -347,7 +347,7 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
 DRE por semana (segunda a domingo), mesma conta da tela:
 ${semanas.map(s => textoSemana(s, hoje)).join('\n')}${resumoSemana ? `
 
-Resumo da semana já enviado ao dono (${resumoSemana.periodo}):
+Resumo escrito da última semana fechada, gerado pelo sistema (${resumoSemana.periodo}):
 ${resumoSemana.resumo}` : ''}`;
     const resposta = await responderComContexto(pergunta, contexto, source);
     console.log('[Agent][5] Resposta analytics:', resposta.slice(0, 200));
