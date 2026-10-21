@@ -206,8 +206,15 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
   return outros('Outro');
 }
 
-// Formas de pagamento que são financeira/crediário (nome como aparece no MP, sem acento, minúsculo)
-const FINANCEIRAS = ['luz'];
+// Valor da venda = o que o próprio MP conta no faturamento dele (valorTotal do item, já sem desconto e
+// sem taxa). Não usa o pagamento: pagamento digitado errado no MP inflava a entrada (NEKTA, out/26).
+// valorCliente 0 = item saiu de graça (brinde); nesse caso o valorTotal é o preço de tabela
+function valorItemMP(item) {
+  if (item.valorCliente != null && item.valorCliente !== '' && parseFloat(item.valorCliente) === 0) return 0;
+  const total = parseFloat(item.valorTotal);
+  if (!isNaN(total)) return Math.max(0, Math.round(total * 100) / 100);
+  return Math.max(0, parseFloat(item.valorCliente || 0) - parseFloat(item.desconto || 0));
+}
 
 // Status da API: 'concluido', 'cancelada' ou 'orcamento' — só o primeiro é venda
 function vendaConcluida(item) {
@@ -434,15 +441,7 @@ async function preview(req, res) {
       manuais.map(r => `${r.data.slice(0, 10)}-${parseFloat(r.valor).toFixed(2)}`)
     );
 
-    function valorFinalItem(item) {
-      const qty      = parseInt(item.quantidade || 1);
-      // valorUnitario × qty = faturamento real (coincide com relatório do MP)
-      const valUnit  = parseFloat(item.valorUnitario ?? NaN);
-      // valorCliente 0 = item saiu de graça (brinde); o valorTotal nesse caso é o preço de tabela, não o cobrado
-      const cobrado  = item.valorCliente != null && item.valorCliente !== '' ? item.valorCliente : item.valorTotal;
-      const bruto    = !isNaN(valUnit) ? valUnit * qty : parseFloat(cobrado || 0);
-      return Math.max(0, bruto - parseFloat(item.desconto || 0));
-    }
+    const valorFinalItem = valorItemMP;
     const keyDoItem = item => item._mpItemKey || mpItemKey(item.vendaId, item.aparelhoDescricao || item.tipoProdutoDescricao || '');
 
     // Pagamentos são da venda, não do item: o upgrade fica só no item de maior valor, pra não contar duas vezes
@@ -505,18 +504,9 @@ async function preview(req, res) {
         ? pagamentos.filter(ehPagamentoAparelho).reduce((s, p) => s + parseFloat(p.valor || 0), 0)
         : 0;
 
-      // Chave "valor líquido": o valorTotal do MP é o que a loja recebeu; a diferença pro valor cobrado é taxa (dedução)
-      const chaveItem  = chavePorId.get(item._chaveId) || chavePorNome.get(item._chaveNome) || chaves[0];
-      const liquido    = parseFloat(item.valorTotal);
-      const temLiquido = chaveItem?.valor_liquido && !isNaN(liquido) && liquido > 0 && valorFinal - liquido > 0.01;
-      // Com cartão a diferença entre o cobrado e o valor lançado no MP é a taxa da maquininha (dedução)
-      const pagouCartao = pagDinheiro.some(p => mapFormaVenda(p.formaPagamentoDescricao, p.parcela) === 'Crédito' || mapFormaVenda(p.formaPagamentoDescricao, p.parcela) === 'Débito');
-      const semPagamentos = !pagDinheiro.length;
-      const deducaoSugerida = temLiquido && (pagouCartao || semPagamentos) ? Math.round((valorFinal - liquido) * 100) / 100 : null;
-      // Sem cartão (dinheiro/PIX) o cliente pagou o valor cheio e o dinheiro entrou: o faturamento é o cobrado.
-      // Exceção: financeira/crediário (ex.: "PIX - LUZ" do Arthur) — a loja fica só com o valor lançado no MP
-      const viaFinanceira = !pagouCartao && pagDinheiro.some(p => FINANCEIRAS.some(n => normalizar(p.formaPagamentoDescricao).includes(n)));
-      const valorVenda = temLiquido && viaFinanceira ? Math.round(liquido * 100) / 100 : valorFinal;
+      // Entra o valor do MP (já líquido de taxa): sem dedução separada, o faturamento bate com o dashboard do MP
+      const valorVenda = valorFinal;
+      const deducaoSugerida = null;
 
       const descricao  = item.aparelhoDescricao || item.tipoProdutoDescricao || '';
       const itemKey    = keyDoItem(item);
@@ -859,11 +849,13 @@ async function osImportar(req, res) {
 const TOLERANCIA = 0.05;
 const ehPreVenda = desc => /pr[eé][\s-]?venda/i.test(desc || '');
 
-// Mesmo valor que a prévia usa (history não traz valorUnitario): cobrado − desconto; 0 = brinde
+// Regra antiga (até out/26): cobrado − desconto. Só para reconhecer lançamentos importados por ela
 function valorCobradoItem(item) {
   const cobrado = item.valorCliente != null && item.valorCliente !== '' ? item.valorCliente : item.valorTotal;
   return Math.max(0, parseFloat(cobrado || 0) - parseFloat(item.desconto || 0));
 }
+const bateValor = (item, valor) =>
+  Math.abs(valorItemMP(item) - valor) <= TOLERANCIA || Math.abs(valorCobradoItem(item) - valor) <= TOLERANCIA;
 
 let logPronto = null;
 function garantirLogConciliacao() {
@@ -987,7 +979,7 @@ async function calcularAjustes(clienteId, inicio, fim) {
     for (const l of doSistema.filter(x => !par.has(x))) {
       const livres = doMP.filter(i => !usado.has(i) && !chavesImportadas.has(i._key) &&
         normalizar(i.aparelhoDescricao || i.tipoProdutoDescricao) === normalizar(l.descricao));
-      const it = livres.find(i => Math.abs(valorCobradoItem(i) - l.valor) <= TOLERANCIA) || livres[0];
+      const it = livres.find(i => bateValor(i, l.valor)) || livres[0];
       if (it) { par.set(l, it); usado.add(it); }
     }
     // Mesmo valor com outro nome = item renomeado (cadastro do MP mudou, ou PREVENDA virou o aparelho entregue):
@@ -1005,7 +997,7 @@ async function calcularAjustes(clienteId, inicio, fim) {
     }
     const renomeados = new Set();
     for (const l of doSistema.filter(x => !par.has(x) && !emDobro.includes(x))) {
-      const it = doMP.find(i => !usado.has(i) && !chavesImportadas.has(i._key) && Math.abs(valorCobradoItem(i) - l.valor) <= TOLERANCIA);
+      const it = doMP.find(i => !usado.has(i) && !chavesImportadas.has(i._key) && bateValor(i, l.valor));
       if (it) { par.set(l, it); usado.add(it); renomeados.add(l); }
     }
     const orfaos = doSistema.filter(l => !par.has(l) && !emDobro.includes(l));
@@ -1015,7 +1007,7 @@ async function calcularAjustes(clienteId, inicio, fim) {
       ajustes.push({ id: `trocado:${vendaId}`, tipo: trocado ? 'trocado' : 'removido', vendaId, data,
         descricao: orfaos.map(l => l.descricao).join(' + '),
         valorAtual: orfaos.reduce((a, l) => a + l.valor, 0),
-        valorNovo: trocado ? novos.reduce((a, i) => a + valorCobradoItem(i), 0) : 0, marcado: true,
+        valorNovo: trocado ? novos.reduce((a, i) => a + valorItemMP(i), 0) : 0, marcado: true,
         motivo: trocado
           ? `No Mercado Phone o item virou: ${novos.map(i => i.aparelhoDescricao || i.tipoProdutoDescricao).join(' + ')}. Depois de corrigir, importe o item novo em "Buscar no MP"`
           : 'Item tirado da venda no Mercado Phone',
@@ -1025,10 +1017,8 @@ async function calcularAjustes(clienteId, inicio, fim) {
     for (const l of doSistema) {
       const it = par.get(l);
       if (!it) continue;
-      const chave   = it._chave;
-      const cobrado = valorCobradoItem(it);
-      const liquido = parseFloat(it.valorTotal);
-      const custo   = parseFloat(it.valorCusto || 0);
+      const valorMP = valorItemMP(it);
+      const custo  = parseFloat(it.valorCusto || 0);
       const cmv     = vinculadas(l).find(s => s.is_cmv);
       const campos    = {};   // da entrada
       const camposCmv = {};
@@ -1043,21 +1033,19 @@ async function calcularAjustes(clienteId, inicio, fim) {
         motivos.push(`No Mercado Phone o item virou: ${nome}`);
       }
 
-      const bateCobrado = Math.abs(l.valor - cobrado) <= TOLERANCIA;
-      // Importações antigas (até set/26) gravavam o valorTotal do MP em qualquer chave: isso não é mudança no MP
-      const bateLiquido = !isNaN(liquido) && Math.abs(l.valor - liquido) <= TOLERANCIA;
-      if (!bateCobrado && !bateLiquido) {
-        if (cobrado === 0) {
+      // Entrada antiga com taxa separada (valor cheio + valor_recebido) também volta para o valor do MP, sem dedução
+      if (Math.abs(l.valor - valorMP) > TOLERANCIA || l.valor_recebido != null) {
+        if (valorMP === 0) {
           campos.valor = 0; campos.valor_recebido = null;
           if (['Acessórios', 'Outros Produtos'].includes(l.categoria)) { campos.categoria = 'Acessórios'; campos.subcategoria = 'Brindes'; }
           motivos.push('Saiu de brinde (R$ 0) no Mercado Phone');
           if (cmv && campos.subcategoria === 'Brindes') camposCmv.subcategoria = 'Brindes';
         } else {
-          // Lançada pelo líquido (financeira) segue pelo líquido; senão vale o cobrado, mantendo a taxa como dedução
-          const pelaFinanceira = chave.valor_liquido && l.valor_recebido == null && l.valor < cobrado - TOLERANCIA && liquido > 0;
-          campos.valor = Math.round((pelaFinanceira ? liquido : cobrado) * 100) / 100;
-          if (l.valor_recebido != null) campos.valor_recebido = chave.valor_liquido && liquido > 0 && liquido < campos.valor ? liquido : null;
-          motivos.push(`Valor diferente do Mercado Phone (${fmtBRL(l.valor)} aqui, ${fmtBRL(campos.valor)} lá)`);
+          campos.valor = valorMP;
+          if (l.valor_recebido != null) campos.valor_recebido = null;
+          motivos.push(Math.abs(l.valor - valorMP) > TOLERANCIA
+            ? `Valor diferente do Mercado Phone (${fmtBRL(l.valor)} aqui, ${fmtBRL(valorMP)} lá)`
+            : 'Tira a taxa de cartão separada: vale o valor do Mercado Phone');
         }
       }
       if (cmv && custo > 0 && Math.abs(cmv.valor - custo) > TOLERANCIA) {

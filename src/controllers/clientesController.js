@@ -66,6 +66,23 @@ async function editar(req, res) {
   }
 }
 
+// Ficha "Regras do cliente": o que é particular da loja (o que entra, o que não entra) — somente admin
+async function salvarRegras(req, res) {
+  try {
+    const { id } = req.params;
+    const regras = String(req.body.regras ?? '').trim();
+    const result = await pool.query(
+      'UPDATE clientes SET regras = $1 WHERE id = $2 RETURNING *',
+      [regras || null, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[clientes.salvarRegras]', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+}
+
 // Excluir cliente — somente admin
 async function excluir(req, res) {
   if (req.usuario.papel !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
@@ -81,4 +98,4 @@ async function excluir(req, res) {
   }
 }
 
-module.exports = { listar, buscar, criar, editar, excluir };
+module.exports = { listar, buscar, criar, editar, salvarRegras, excluir };

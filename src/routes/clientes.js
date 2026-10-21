@@ -10,6 +10,7 @@ router.get('/',       verificarPermissao('clientes'), controller.listar);
 router.get('/:id',    verificarPermissao('clientes'), controller.buscar);
 router.post('/',      soAdmin, controller.criar);
 router.put('/:id',    soAdmin, controller.editar);
+router.put('/:id/regras', soAdmin, controller.salvarRegras);
 router.delete('/:id', soAdmin, controller.excluir);
 
 module.exports = router;
