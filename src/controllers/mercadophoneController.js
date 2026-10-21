@@ -172,24 +172,30 @@ function mapCategoria(tipoProduto, tipoVenda, aparelho, canalVenda, marca) {
     if (tem(tpn, ['bebida']))                                        return outros('Bebidas');
     if (tem(tpn, ['caixa de som', 'jbl']))                           return outros(nome.includes('jbl') ? 'JBL' : 'Eletrônicos');
     if (tem(tpn, ['tablet']))  return nome.includes('ipad') ? { categoria: 'Aparelhos', subcategoria: 'iPad' } : outros('Informática');
-    if (tem(tpn, ['relogio', 'smartwatch']))
-      return nome.includes('apple watch') ? { categoria: 'Aparelhos', subcategoria: 'Apple Watch' } : outros('Eletrônicos');
+    // Relógio de outra marca (Garmin, Amazfit…) é Smartwatch; o genérico barato cadastrado como acessório segue acessório
+    if (tem(tpn, ['relogio', 'smartwatch']) && !tem(tpn, ['acess']))
+      return { categoria: 'Aparelhos', subcategoria: nome.includes('apple watch') ? 'Apple Watch' : 'Smartwatch' };
     if (tem(tpn, ['bike', 'bicicleta', 'patinete', 'scooter', 'eletric', 'depilador', 'secador']))  return outros('Eletrônicos');
     if (tem(tpn, ['garrafa', 'termic']))                             return outros('Outro');
     if (ehAcessorio)
       return { categoria: 'Acessórios', subcategoria: mapAcessorioSub(str, tp) };
-    if (tem(tpn, ['notebook', 'informatica', 'computador']))        return outros('Informática');
+    if (tem(nome, ['notebook']) || tem(tpn, ['notebook']))          return { categoria: 'Aparelhos', subcategoria: 'Notebook' };
+    if (tem(tpn, ['informatica', 'computador']))                     return outros('Informática');
     if (tem(tpn, ['eletronic']))                                     return outros('Eletrônicos');
   }
 
   // Aparelhos — só com sinal de celular/Apple: o tipo "Celular" do MP, o nome ou a marca
   if (nome.includes('iphone') || (ehCelular && ma.includes('apple')))   return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  // "17 PRO MAX BE/A ANATEL": sem a palavra iPhone, mas com o código de região da Apple (BE/A, LL/A, ZD/A…)
+  if (/\b[a-z]{1,2}\/a\b/.test(nome) && /\b(1[1-9]|x[rs]?|se)\b/.test(nome)) return { categoria: 'Aparelhos', subcategoria: 'iPhone' };
+  if (tem(nome, ['garmin', 'amazfit', 'smartwatch', 'galaxy watch']))  return { categoria: 'Aparelhos', subcategoria: 'Smartwatch' };
   if (nome.includes('airpods'))                                         return { categoria: 'Aparelhos', subcategoria: 'AirPods' };
   if (nome.includes('apple watch'))                                     return { categoria: 'Aparelhos', subcategoria: 'Apple Watch' };
   if (nome.includes('ipad'))                                            return { categoria: 'Aparelhos', subcategoria: 'iPad' };
   if (nome.includes('macbook'))                                         return { categoria: 'Aparelhos', subcategoria: 'Mac' };
   const androidMarcas = ['samsung', 'galaxy', 'motorola', 'moto g', 'xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus',
-    'huawei', 'positivo', 'multilaser', 'infinix', 'zte', 'nokia', 'lg ', 'asus'];
+    'huawei', 'positivo', 'multilaser', 'infinix', 'zte', 'nokia', 'lg ', 'asus', 'honor', 'hotwav', 'hot wav', 'tecno', 'itel',
+    'blackview', 'doogee', 'ulefone', 'umidigi', 'oukitel', 'cubot'];
   if (nome.includes('android') || androidMarcas.some(m => nome.includes(m) || ma.includes(m.trim())))
     return { categoria: 'Aparelhos', subcategoria: 'Android' };
   // Celular sem marca no nome ("14 PRO", "PREVENDA"): aparelho, sem chutar o sistema
@@ -222,6 +228,8 @@ function mapCmvSub(subcategoria, categoria) {
   if (s.includes('iphone'))                                return 'Aparelhos iPhone';
   if (s.includes('android'))                               return 'Aparelhos Android';
   if (s.includes('airpods'))                               return 'AirPods';
+  if (s.includes('smartwatch'))                            return 'Smartwatch';
+  if (s.includes('notebook'))                              return 'Notebook';
   if (s.includes('apple watch') || s.includes('watch'))   return 'Apple Watch';
   if (s.includes('ipad'))                                  return 'iPad';
   if (s.includes('mac'))                                   return 'MacBook';

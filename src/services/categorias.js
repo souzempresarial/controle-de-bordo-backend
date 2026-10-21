@@ -1,6 +1,6 @@
 // Mesma lista de controle-de-bordo-react/src/services/constants.js — ao mudar lá, mudar aqui
 const CATEGORIAS_SAIDA = {
-  'Custos Variáveis Diretos':   ['Aparelhos iPhone','Aparelhos Android','iPad','MacBook','Apple Watch','AirPods','Upgrade','Acessórios','Embalagens','Brindes','Assistência Técnica','Perda de Mercadoria','Outros'],
+  'Custos Variáveis Diretos':   ['Aparelhos iPhone','Aparelhos Android','iPad','MacBook','Apple Watch','AirPods','Smartwatch','Notebook','Upgrade','Acessórios','Embalagens','Brindes','Assistência Técnica','Perda de Mercadoria','Outros'],
   'Fornecedores (Estoque)':     ['Aparelhos','Pix Fornecedor','Acessórios','Embalagens','Brindes','Assistência Técnica','Reparo','Boleto','Outro'],
   'Deduções das Vendas':        ['Taxas de Maquininha','Estornos','Descontos','Outro'],
   'Custos Variáveis Indiretos': ['Comissões do Vendedor','Bônus de Indicação','Motoboy','Freelancers','Horas Extras de Colaboradores','Outro'],
