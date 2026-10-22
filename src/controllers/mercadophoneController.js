@@ -452,12 +452,14 @@ async function preview(req, res) {
     }
 
     // Categoria que o cliente já usou para o mesmo produto em importações anteriores (inclui correções feitas na mão).
-    // "Aparelhos > Outro" era o chute da regra antiga e Upgrade depende da venda, então não valem como histórico
+    // "Aparelhos > Outro" era o chute da regra antiga; Upgrade e Brindes dependem da venda (o mesmo carregador
+    // sai de brinde numa venda e é vendido em outra), então não valem como histórico
     const { rows: histRows } = await pool.query(
       `SELECT DISTINCT ON (lower(trim(descricao))) lower(trim(descricao)) AS d, categoria, subcategoria
        FROM lancamentos
        WHERE cliente_id = $1 AND tipo = 'Entrada' AND obs LIKE '[MP-%' AND descricao IS NOT NULL
          AND NOT (categoria = 'Aparelhos' AND subcategoria IN ('Outro', 'Upgrade'))
+         AND subcategoria IS DISTINCT FROM 'Brindes'
          AND categoria <> 'Assistência Técnica'
        ORDER BY lower(trim(descricao)), id DESC`,
       [clienteId]
@@ -1154,4 +1156,4 @@ async function desfazerConciliacao(req, res) {
   }
 }
 
-module.exports = { status, listarChaves, adicionarChave, salvarChave, configurarChave, removerChave, preview, importar, osPreview, osImportar, conferir, aplicarConciliacao, desfazerConciliacao };
+module.exports = { mapCategoria, status, listarChaves, adicionarChave, salvarChave, configurarChave, removerChave, preview, importar, osPreview, osImportar, conferir, aplicarConciliacao, desfazerConciliacao };
