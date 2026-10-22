@@ -35,7 +35,8 @@ Dicas para casos comuns:
 - energia, Enel, Cemig, Copel → Despesas com Ocupação > Luz
 - DAS, Simples Nacional → Impostos > DAS - Simples Nacional
 - parcela de empréstimo, financiamento → Dívidas / Empréstimos > Parcela de Empréstimo
-- Meta, Facebook Ads, Google Ads, Instagram → Despesas Variáveis > Mídia Paga
+- Meta, Facebook Ads, Google Ads, Instagram → Marketing > Tráfego Pago
+- supermercado, água, café, material de limpeza → Despesas Variáveis > Suprimentos
 
 Não extraia dinheiro guardado na própria conta (reserva, cofrinho, caixinha, aplicação automática — ex: "Dinheiro Guardado / Reserva Stone"): o dinheiro continua da loja, não é despesa.
 

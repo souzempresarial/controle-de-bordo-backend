@@ -156,9 +156,9 @@ EXEMPLOS COMPLEXOS:
 - "me mostra os pagamentos de pró-labore de setembro" → consultar_saida, filtros: [{categoria: Despesas com Pessoal, subcategoria: Pró-Labore / PLR}]
 - "me mostra todas as saídas da semana passada" → consultar_saida, filtros: [], período = semana passada
 - "quais iPhones vendi hoje?" → consultar_entrada, filtros: [{categoria: Aparelhos, subcategoria: iPhone}], hoje
-- "e as de mídia paga? e os patrocínios também?" → consultar_saida, filtros: [{categoria: Despesas Variáveis, subcategoria: Mídia Paga}, {termo: patrocínio}]
+- "e as de mídia paga? e os patrocínios também?" → consultar_saida, filtros: [{categoria: Marketing, subcategoria: Tráfego Pago}, {termo: patrocínio}]
 - "quanto paguei pro fornecedor Volt?" → consultar_saida, filtros: [{termo: Volt}]
-- "gasto com marketing" (sempre o mesmo conjunto) → consultar_saida, filtros: [{categoria: Serviços Terceirizados, subcategoria: Assessoria de Marketing}, {categoria: Despesas Variáveis, subcategoria: Mídia Paga}, {termo: marketing}]
+- "gasto com marketing" → consultar_saida, filtros: [{categoria: Marketing}]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL 4 — consultar_analytics
@@ -217,12 +217,13 @@ Fornecedores (Estoque) → Aparelhos, Pix Fornecedor, Acessórios, Embalagens, B
 Deduções das Vendas → Taxas de Maquininha, Estornos, Descontos, Outro
 Custos Variáveis Indiretos → Comissões do Vendedor, Bônus de Indicação, Motoboy, Freelancers, Horas Extras de Colaboradores, Outro
 Despesas com Ocupação → Luz, Operadora Celular, Internet, Água, Aluguel / Condomínio / IPTU, Segurança, Seguro do Imóvel, Outro
-Despesas com Pessoal → Vales - Transporte & Refeição, 13º & Férias, INSS & FGTS, Adiantamento, Folha de Pagamento, Pró-Labore / PLR, Outro
-Despesas Variáveis → Mídia Paga, Tarifas Bancárias, Frete, Garantia, Manutenções / Reparos, Treinamentos, Uber, Deslocamento, Alimentação, Eventos, Veículo, Fatura de Cartão, Outro
-Softwares / Tecnologias → CRM, Sistema ERP, Outro
-Serviços Terceirizados → Assessoria Contábil, BPO Terceirização, Emissão de NF-e, Serviços Gerais (Limpeza), Google Meu Negócio, Assistência Técnica, Assessoria de Marketing, Advogado, Consultoria, Outro
-Impostos → DAS - Simples Nacional, DAS - MEIs, Darf, Outro
-Saídas Não-Operacionais → Suprimentos, Obras, Despesas Extras, Decorações, Manutenções em Equipamentos, Patrocínio, Momento Recreativo, Outro
+Despesas com Pessoal → Vales - Transporte & Refeição, 13º & Férias, INSS & FGTS, Adiantamento, Folha de Pagamento, Pró-Labore / PLR, Plano de Saúde, Rescisão e Acertos, Exames e Medicina do Trabalho, Outro
+Despesas Variáveis → Tarifas Bancárias, Frete, Garantia, Manutenções / Reparos, Treinamentos, Uber, Deslocamento, Alimentação, Suprimentos, Eventos, Veículo, Fatura de Cartão, Outro
+Marketing → Tráfego Pago, Agência / Gestor de Tráfego, Produção de Conteúdo, Influenciadores, Patrocínio, Ações e Brindes de Marketing, Mídia Offline, Google Meu Negócio, Outro
+Softwares / Tecnologias → CRM, Sistema ERP, Assinaturas e Apps, Site, Domínio e Hospedagem, Sistema Fiscal / Emissor de NF, Outro
+Serviços Terceirizados → Assessoria Contábil, BPO Terceirização, Emissão de NF-e, Serviços Gerais (Limpeza), Assistência Técnica, Advogado, Consultoria, Outro
+Impostos → DAS - Simples Nacional, DAS - MEIs, Darf, ICMS / Estadual, Taxas Municipais, Outro
+Saídas Não-Operacionais → Despesas Extras, Decorações, Momento Recreativo, Outro
 Dívidas / Empréstimos → Parcela de Empréstimo, Juros, Amortização, IOF, Multa, Cheque Especial, Cartão de Crédito PJ, Outro
 Investimentos → Equipamentos, Reformas, Computadores, Veículos, Imóveis, Outro
 
@@ -284,7 +285,10 @@ Saídas — Variáveis:
 Saídas — Serviços / Impostos / Dívidas:
 - "simples", "DAS", "imposto mensal" → Impostos > DAS - Simples Nacional
 - "contador", "contabilidade" → Serviços Terceirizados > Assessoria Contábil
-- "marketing", "agência" → Serviços Terceirizados > Assessoria de Marketing
+- "marketing", "agência", "gestor de tráfego" → Marketing > Agência / Gestor de Tráfego
+- "Meta", "Facebook", "Instagram", "Google Ads", "impulsionar" → Marketing > Tráfego Pago
+- "patrocínio" → Marketing > Patrocínio
+- "supermercado", "água", "café", "material de limpeza" → Despesas Variáveis > Suprimentos
 - "NF-e", "nota fiscal" → Serviços Terceirizados > Emissão de NF-e
 - "empréstimo", "parcela", "prestação" → Dívidas / Empréstimos > Parcela de Empréstimo
 - "juros" → Dívidas / Empréstimos > Juros

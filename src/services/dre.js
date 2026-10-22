@@ -29,10 +29,11 @@ function calcDREBase(lm) {
   const ocupacao     = sai('Despesas com Ocupação');
   const pessoal      = sai('Despesas com Pessoal');
   const variaveis    = sai('Despesas Variáveis');
+  const marketing    = sai('Marketing');
   const softwares    = sai('Softwares / Tecnologias');
   const terceiros    = sai('Serviços Terceirizados');
   const impostos     = sai('Impostos');
-  const sga          = ocupacao + pessoal + variaveis + softwares + terceiros + impostos;
+  const sga          = ocupacao + pessoal + variaveis + marketing + softwares + terceiros + impostos;
   const ebitda       = contribuicao - sga;
 
   const despJuros    = lm.filter(l => l.tipo === 'Saída' && l.categoria === 'Dívidas / Empréstimos' && l.subcategoria !== 'Amortização').reduce((a, l) => a + l.valor, 0);
@@ -42,7 +43,7 @@ function calcDREBase(lm) {
   return {
     aparelhos, acessorios, assistencia, outrosProd, recBruta, deducoes, recLiquida,
     cmvTotal, lucroBruto, custosVarInd, contribuicao,
-    ocupacao, pessoal, variaveis, softwares, terceiros, impostos, sga, ebitda, resFin,
+    ocupacao, pessoal, variaveis, marketing, softwares, terceiros, impostos, sga, ebitda, resFin,
   };
 }
 
@@ -89,6 +90,7 @@ const GRUPOS_DETALHE = [
   ['Despesas com Pessoal', 'Pessoal'],
   ['Despesas com Ocupação', 'Ocupação'],
   ['Despesas Variáveis', 'Variáveis'],
+  ['Marketing', 'Marketing'],
   ['Softwares / Tecnologias', 'Softwares'],
   ['Serviços Terceirizados', 'Terceirizados'],
   ['Impostos', 'Impostos'],
@@ -128,7 +130,7 @@ Receita Bruta ${brl(d.recBruta)} (Aparelhos ${brl(d.aparelhos)}, Acessórios ${b
 Deduções ${brl(d.deducoes)} · Receita Líquida ${brl(d.recLiquida)}
 CMV ${brl(d.cmvTotal)} · Lucro Bruto ${brl(d.lucroBruto)} (margem ${pct(d.lucroBruto, d.recBruta)})
 Custos Variáveis Indiretos ${brl(d.custosVarInd)} · Margem de Contribuição ${brl(d.contribuicao)} (${pct(d.contribuicao, d.recBruta)})
-Despesas SG&A ${brl(d.sga)} (Pessoal ${brl(d.pessoal)}, Ocupação ${brl(d.ocupacao)}, Variáveis ${brl(d.variaveis)}, Softwares ${brl(d.softwares)}, Terceirizados ${brl(d.terceiros)}, Impostos ${brl(d.impostos)})
+Despesas SG&A ${brl(d.sga)} (Pessoal ${brl(d.pessoal)}, Ocupação ${brl(d.ocupacao)}, Variáveis ${brl(d.variaveis)}, Marketing ${brl(d.marketing)}, Softwares ${brl(d.softwares)}, Terceirizados ${brl(d.terceiros)}, Impostos ${brl(d.impostos)})
 EBITDA ${brl(d.ebitda)} · Resultado Financeiro ${brl(d.resFin)}
 Lucro Líquido ${brl(d.lucroLiq)} (margem líquida ${pct(d.lucroLiq, d.recBruta)})
 Caixa do mês: entrou ${brl(d.entCaixa)}, saiu ${brl(d.saiCaixa)}${textoDetalhe(d)}`;

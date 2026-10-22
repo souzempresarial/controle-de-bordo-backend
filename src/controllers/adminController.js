@@ -2,7 +2,7 @@ const pool = require('../models/db');
 
 // Mirrors frontend constants.js — keep in sync
 const CMVCATS      = ['Custos Variáveis Diretos'];
-const SGA_CATS     = ['Custos Variáveis Indiretos','Despesas com Ocupação','Despesas com Pessoal','Despesas Variáveis','Softwares / Tecnologias','Serviços Terceirizados','Impostos'];
+const SGA_CATS     = ['Custos Variáveis Indiretos','Despesas com Ocupação','Despesas com Pessoal','Despesas Variáveis','Marketing','Softwares / Tecnologias','Serviços Terceirizados','Impostos'];
 const NAOOP_CATS   = ['Dívidas / Empréstimos','Saídas Não-Operacionais'];
 const DEDUCOES_CATS = ['Deduções das Vendas'];
 const APORTE_CATS  = ['Aportes e Transferências'];
