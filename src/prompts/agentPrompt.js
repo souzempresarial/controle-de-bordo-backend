@@ -158,6 +158,7 @@ EXEMPLOS COMPLEXOS:
 - "quais iPhones vendi hoje?" → consultar_entrada, filtros: [{categoria: Aparelhos, subcategoria: iPhone}], hoje
 - "e as de mídia paga? e os patrocínios também?" → consultar_saida, filtros: [{categoria: Despesas Variáveis, subcategoria: Mídia Paga}, {termo: patrocínio}]
 - "quanto paguei pro fornecedor Volt?" → consultar_saida, filtros: [{termo: Volt}]
+- "gasto com marketing" (sempre o mesmo conjunto) → consultar_saida, filtros: [{categoria: Serviços Terceirizados, subcategoria: Assessoria de Marketing}, {categoria: Despesas Variáveis, subcategoria: Mídia Paga}, {termo: marketing}]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL 4 — consultar_analytics

@@ -249,11 +249,14 @@ async function buscarLancamentos(clienteId, startDate, endDate, tipo, filtros = 
       params
     ),
     pool.query(`SELECT count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos WHERE ${where}`, params),
-    // Mais de um filtro: soma de cada um separado
+    // Mais de um filtro: soma de cada um separado. Lançamento que cai em dois filtros conta só no primeiro,
+    // senão os subtotais somam mais que o total (ex.: "Assessoria de Marketing" e o termo "marketing")
     grupos.length > 1
-      ? Promise.all(grupos.map(g => pool.query(
-          `SELECT count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos WHERE ${where} AND ${g.sql}`, params)
+      ? Promise.all(grupos.map((g, i) => pool.query(
+          `SELECT count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos
+           WHERE ${where} AND ${g.sql}${i ? ` AND NOT (${grupos.slice(0, i).map(x => x.sql).join(' OR ')})` : ''}`, params)
           .then(({ rows: [r] }) => ({ nome: nomeFiltro(g.f), ...r }))))
+          .then(gs => gs.filter(g => g.quantidade > 0))
       : [],
     // Sem filtro: totais por categoria, que dizem mais que uma lista de 100+ lançamentos
     grupos.length
