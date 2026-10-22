@@ -128,10 +128,16 @@ USE ESTA TOOL (não consultar_analytics) para:
     "start_date": "YYYY-MM-DD" | null,
     "end_date": "YYYY-MM-DD" | null,
     "periodo": "texto legível — ex: outubro de 2026, essa semana, hoje",
-    "categoria": "categoria exata conforme lista" | null,
-    "subcategoria": "subcategoria exata conforme lista" | null
+    "filtros": [
+      { "categoria": "categoria exata conforme lista" | null, "subcategoria": "subcategoria exata conforme lista" | null, "termo": "palavra para buscar no nome/descrição" | null }
+    ]
   }
 }
+
+FILTROS:
+- Um item de "filtros" para CADA coisa que o usuário pediu. "mídia paga e patrocínios" → 2 filtros. O resultado junta todos e soma cada um separado.
+- Categoria/subcategoria que existe na lista → use os nomes exatos. Coisa que não é categoria (patrocínio, um fornecedor, um nome, "facebook", "gasolina") → use "termo" com a palavra; o termo procura no nome, na descrição e na subcategoria.
+- Se o usuário citou QUALQUER coisa específica, "filtros" NUNCA pode ficar vazio. Vazio ([]) só quando ele pede tudo ("todas as saídas", "tudo de hoje").
 
 REGRAS DE DATA (use a data atual para calcular):
 - "hoje" → start_date = end_date = data de hoje
@@ -146,10 +152,12 @@ REGRAS DE DATA (use a data atual para calcular):
 - "semestre" → últimos 6 meses
 
 EXEMPLOS COMPLEXOS:
-- "quanto recebi de assistência técnica em setembro?" → consultar_entrada, categoria: Assistência Técnica, start: 2026-09-01, end: 2026-09-30
-- "me mostra os pagamentos de pró-labore de setembro" → consultar_saida, categoria: Despesas com Pessoal, sub: Pró-Labore / PLR
-- "me mostra todas as saídas da semana passada" → consultar_saida sem categoria, período = semana passada
-- "quais iPhones vendi hoje?" → consultar_entrada, categoria: Aparelhos, sub: iPhone, hoje
+- "quanto recebi de assistência técnica em setembro?" → consultar_entrada, filtros: [{categoria: Assistência Técnica}], start: 2026-09-01, end: 2026-09-30
+- "me mostra os pagamentos de pró-labore de setembro" → consultar_saida, filtros: [{categoria: Despesas com Pessoal, subcategoria: Pró-Labore / PLR}]
+- "me mostra todas as saídas da semana passada" → consultar_saida, filtros: [], período = semana passada
+- "quais iPhones vendi hoje?" → consultar_entrada, filtros: [{categoria: Aparelhos, subcategoria: iPhone}], hoje
+- "e as de mídia paga? e os patrocínios também?" → consultar_saida, filtros: [{categoria: Despesas Variáveis, subcategoria: Mídia Paga}, {termo: patrocínio}]
+- "quanto paguei pro fornecedor Volt?" → consultar_saida, filtros: [{termo: Volt}]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL 4 — consultar_analytics

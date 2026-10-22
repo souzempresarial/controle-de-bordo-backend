@@ -194,7 +194,35 @@ async function criarLancamento(clienteId, tipo, dados) {
 
 // ---------- tool: consultar lançamentos ----------
 
-async function buscarLancamentos(clienteId, startDate, endDate, tipo, categoria, subcategoria) {
+// Sem acento e minúsculo dos dois lados: "patrocínios" acha "Patrocínio", "midia" acha "Mídia"
+const SEM_ACENTO = col => `translate(lower(${col}), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
+const semAcento  = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+// Cada filtro vira um grupo (categoria/subcategoria exatas ou termo livre); a busca junta todos com OU
+function montarFiltro(f, params) {
+  const partes = [];
+  if (f.categoria) {
+    params.push(f.categoria);
+    partes.push(`categoria ILIKE $${params.length}`);
+  }
+  if (f.subcategoria) {
+    params.push(`%${semAcento(f.subcategoria)}%`);
+    const idx = params.length;
+    partes.push(`(${SEM_ACENTO('subcategoria')} LIKE $${idx} OR ${SEM_ACENTO("COALESCE(descricao, '')")} LIKE $${idx})`);
+  }
+  if (f.termo) {
+    // Plural vira singular ("patrocínios" → "patrocinio") pra achar a subcategoria no singular
+    const termo = semAcento(f.termo).trim().replace(/(?<=\w{4})s$/, '');
+    params.push(`%${termo}%`);
+    const idx = params.length;
+    partes.push(`(${SEM_ACENTO("COALESCE(descricao, '')")} LIKE $${idx} OR ${SEM_ACENTO("COALESCE(subcategoria, '')")} LIKE $${idx} OR ${SEM_ACENTO('categoria')} LIKE $${idx})`);
+  }
+  return partes.length ? `(${partes.join(' AND ')})` : null;
+}
+
+const nomeFiltro = f => { const n = String(f.termo || f.subcategoria || f.categoria); return n[0].toUpperCase() + n.slice(1); };
+
+async function buscarLancamentos(clienteId, startDate, endDate, tipo, filtros = []) {
   const params  = [clienteId];
   let   where   = 'cliente_id = $1 AND is_cmv = false AND status != \'Cancelado\'';
 
@@ -210,29 +238,35 @@ async function buscarLancamentos(clienteId, startDate, endDate, tipo, categoria,
     params.push(tipo);
     where += ` AND tipo = $${params.length}`;
   }
-  if (categoria) {
-    params.push(categoria);
-    where += ` AND categoria ILIKE $${params.length}`;
-  }
-  if (subcategoria) {
-    params.push(`%${subcategoria}%`);
-    const idx = params.length;
-    where += ` AND (subcategoria ILIKE $${idx} OR descricao ILIKE $${idx})`;
-  }
+  const grupos = filtros.map(f => ({ f, sql: montarFiltro(f, params) })).filter(g => g.sql);
+  if (grupos.length) where += ` AND (${grupos.map(g => g.sql).join(' OR ')})`;
 
   // Total e contagem sem LIMIT: a lista mostra só alguns, mas a soma tem que ser do período inteiro
-  const [{ rows }, { rows: [agg] }] = await Promise.all([
+  const [{ rows }, { rows: [agg] }, porGrupo, { rows: porCategoria }] = await Promise.all([
     pool.query(
       `SELECT id, tipo, valor, data, categoria, subcategoria, descricao, pagamento
        FROM lancamentos WHERE ${where} ORDER BY data DESC LIMIT 20`,
       params
     ),
     pool.query(`SELECT count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos WHERE ${where}`, params),
+    // Mais de um filtro: soma de cada um separado
+    grupos.length > 1
+      ? Promise.all(grupos.map(g => pool.query(
+          `SELECT count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos WHERE ${where} AND ${g.sql}`, params)
+          .then(({ rows: [r] }) => ({ nome: nomeFiltro(g.f), ...r }))))
+      : [],
+    // Sem filtro: totais por categoria, que dizem mais que uma lista de 100+ lançamentos
+    grupos.length
+      ? { rows: [] }
+      : pool.query(`SELECT categoria, count(*)::int AS quantidade, COALESCE(sum(valor), 0)::float AS total FROM lancamentos
+                    WHERE ${where} GROUP BY categoria ORDER BY total DESC`, params),
   ]);
-  return { rows, quantidade: agg.quantidade, total: agg.total };
+  return { rows, quantidade: agg.quantidade, total: agg.total, porGrupo, porCategoria };
 }
 
-function formatarResultadoConsulta({ rows, quantidade, total }, periodo, tipo) {
+const fmtBRL = v => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function formatarResultadoConsulta({ rows, quantidade, total, porGrupo = [], porCategoria = [] }, periodo, tipo) {
   const singular = tipo === 'Entrada' ? 'entrada' : tipo === 'Saída' ? 'saída' : 'lançamento';
   const plural   = tipo === 'Entrada' ? 'entradas' : tipo === 'Saída' ? 'saídas' : 'lançamentos';
   const label    = quantidade === 1 ? singular : plural;
@@ -249,6 +283,12 @@ function formatarResultadoConsulta({ rows, quantidade, total }, periodo, tipo) {
     return `Nenhum lançamento encontrado${periodoStr.trim() ? ' ' + periodoStr.trim() : ''}. Tente ajustar o período ou verifique se há dados cadastrados.`;
   }
 
+  // Pedido sem filtro com muita coisa: mostra o resumo por categoria em vez de despejar a lista
+  if (porCategoria.length && quantidade > 20) {
+    const linhasCat = porCategoria.map(c => `• ${c.categoria || 'Sem categoria'} — ${c.quantidade} — ${fmtBRL(c.total)}`);
+    return `${quantidade} ${label}${periodoStr}, por categoria:\n\n${linhasCat.join('\n')}\n\nTotal: ${fmtBRL(total)}\n\nQuer ver os lançamentos de alguma delas?`;
+  }
+
   const exibir = rows.slice(0, 8);
 
   const linhas = exibir.map(r => {
@@ -262,7 +302,8 @@ function formatarResultadoConsulta({ rows, quantidade, total }, periodo, tipo) {
 
   let texto = `${quantidade} ${label}${periodoStr}:\n\n${linhas.join('\n')}`;
   if (quantidade > 8) texto += `\n... e mais ${quantidade - 8} lançamentos`;
-  texto += `\n\nTotal: R$ ${total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+  if (porGrupo.length) texto += `\n\n${porGrupo.map(g => `${g.nome}: ${g.quantidade} — ${fmtBRL(g.total)}`).join('\n')}`;
+  texto += `\n\nTotal: ${fmtBRL(total)}`;
 
   return texto;
 }
@@ -308,11 +349,12 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
     const startDate   = dados.start_date   || null;
     const endDate     = dados.end_date     || null;
     const periodo     = dados.periodo      || null;
-    const categoria   = dados.categoria    || null;
-    const subcategoria = dados.subcategoria || null;
-    console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s cat=%s sub=%s', tipo, startDate, endDate, categoria, subcategoria);
+    // Formato antigo (categoria/subcategoria soltos) ainda vale como um filtro só
+    const filtros = (Array.isArray(dados.filtros) ? dados.filtros : [{ categoria: dados.categoria, subcategoria: dados.subcategoria }])
+      .filter(f => f && (f.categoria || f.subcategoria || f.termo));
+    console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s filtros=%s', tipo, startDate, endDate, JSON.stringify(filtros));
 
-    const consulta = await buscarLancamentos(clienteId, startDate, endDate, tipo, categoria, subcategoria);
+    const consulta = await buscarLancamentos(clienteId, startDate, endDate, tipo, filtros);
     console.log('[Agent][4] Lançamentos encontrados:', consulta.quantidade, '| total:', consulta.total);
 
     const resposta = formatarResultadoConsulta(consulta, periodo, tipo);
