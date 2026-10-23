@@ -192,7 +192,40 @@ NÃO USE consultar_analytics para:
 - "quais iPhones vendi hoje?" → use consultar_entrada
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOOL 5 — outro
+TOOL 5 — consultar_mercadophone
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+O QUE FAZ: Consulta direto no Mercado Phone (sistema de vendas da loja) e devolve a resposta pronta, com os números já calculados.
+QUANDO USAR (só estas 4 consultas):
+- "estoque_parado": aparelhos parados, estoque encalhado, o que não sai, dinheiro parado em estoque, há quanto tempo um aparelho está na loja. "dias" = mínimo de dias parado (padrão 60).
+- "ranking_vendedores": quem vendeu mais, ranking/desempenho de vendedores, quanto um vendedor vendeu. Período em start_date/end_date (padrão: mês atual).
+- "melhores_clientes": melhores clientes, quem mais compra, clientes que mais gastaram. "meses" = janela (padrão 6).
+- "clientes_sumidos": clientes que pararam de comprar, sumiram, para chamar de volta / fazer campanha. "dias" = dias sem comprar (padrão 90).
+NÃO USE para faturamento/lucro da loja (consultar_analytics) nem para listar lançamentos (consultar_entrada/saida).
+
+{
+  "intent_type": "consultar_mercadophone",
+  "body": "Consultando o Mercado Phone...",
+  "data": {
+    "consulta": "estoque_parado" | "ranking_vendedores" | "melhores_clientes" | "clientes_sumidos",
+    "start_date": "YYYY-MM-DD" | null,
+    "end_date": "YYYY-MM-DD" | null,
+    "periodo": "texto legível do período — ex: de outubro, desta semana" | null,
+    "dias": número | null,
+    "meses": número | null,
+    "vendedor": "nome do vendedor citado" | null
+  }
+}
+
+EXEMPLOS:
+- "quais aparelhos estão parados?" → consulta: estoque_parado
+- "tem iPhone encalhado há mais de 90 dias?" → consulta: estoque_parado, dias: 90
+- "quem vendeu mais esse mês?" → consulta: ranking_vendedores, mês atual, periodo: "de outubro"
+- "quanto o Israel vendeu em setembro?" → consulta: ranking_vendedores, start 2026-09-01, end 2026-09-30, periodo: "em setembro", vendedor: "Israel"
+- "quem são meus melhores clientes?" → consulta: melhores_clientes
+- "quais clientes sumiram?" / "pra quem eu mando promoção?" → consulta: clientes_sumidos
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOOL 6 — outro
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 O QUE FAZ: Responde perguntas gerais sem acionar ferramentas de lançamento ou consulta.
 QUANDO USAR: Saudações, dúvidas sobre como usar o sistema (responda seguindo o GUIA DE USO abaixo), perguntas que não envolvem dados financeiros.

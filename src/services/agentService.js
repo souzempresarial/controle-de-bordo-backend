@@ -399,6 +399,21 @@ ${resumoSemana.resumo}` : ''}`;
     return { resposta, acao: null };
   }
 
+  // ── CONSULTAR MERCADO PHONE ───────────────────────────────────────────────
+  // A conta é feita no servidor (mpConsultas) e o texto já vai pronto: a IA só escolheu qual consulta e o período
+  if (intent_type === 'consultar_mercadophone') {
+    const { consultarMercadoPhone } = require('./mpConsultas');
+    console.log('[Agent][3] Tool: consultarMercadoPhone | %s', JSON.stringify(dados));
+    try {
+      const resposta = await consultarMercadoPhone(clienteId, dados);
+      console.log('[Agent][4] Resposta MP:', resposta.slice(0, 200));
+      return { resposta, acao: null };
+    } catch (err) {
+      console.error('[Agent][MP]', err.message);
+      return { resposta: /recusou/.test(err.message) ? err.message : 'Não consegui consultar o Mercado Phone agora. Tente de novo em alguns instantes.', acao: null };
+    }
+  }
+
   // ── OUTRO ─────────────────────────────────────────────────────────────────
   const resposta = body || 'Como posso ajudar?';
   console.log('[Agent][3] Sem tool. Resposta final:', resposta);
