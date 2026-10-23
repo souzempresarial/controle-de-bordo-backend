@@ -16,6 +16,15 @@ async function mpFetch(url, apiKey, timeoutMs = 30000, tentativas = 2) {
   return mpFetch(url, apiKey, timeoutMs, tentativas - 1);
 }
 
+// Mensagem para o usuário quando o MP recusa a consulta. O motivo do MP (ex.: "sistema bloqueado, validade
+// expirou em 22/10") diz o que fazer; o código HTTP sozinho não diz nada
+async function mensagemErroMP(resp, depois = 'Tente de novo em instantes.') {
+  if (resp.status === 429) return 'O Mercado Phone está limitando as consultas agora. Aguarde uns segundos e tente de novo.';
+  const detalhe = String((await resp.clone().json().catch(() => ({}))).detail || '').trim();
+  if (detalhe) return `O Mercado Phone recusou a consulta: ${detalhe.replace(/\s+/g, ' ')}`;
+  return `O Mercado Phone não respondeu (${resp.status}). ${depois}`;
+}
+
 async function getApiKeys(clienteId) {
   const { rows } = await pool.query(
     'SELECT id, nome, api_key, COALESCE(valor_liquido, false) AS valor_liquido FROM mercadophone_chaves WHERE cliente_id = $1 AND ativa = true ORDER BY id',
@@ -370,12 +379,10 @@ async function preview(req, res) {
 
             const mpResp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
             if (!mpResp.ok) {
-              const err = await mpResp.json().catch(() => ({}));
+              const err = await mpResp.clone().json().catch(() => ({}));
               console.error(`[MP preview] chave ${chave.id} página ${page} erro:`, err.detail || mpResp.status);
               // Lista incompleta faz venda "sumir" da importação: melhor avisar do que mostrar parte
-              return res.status(503).json({ erro: mpResp.status === 429
-                ? 'O Mercado Phone está limitando as consultas agora. Aguarde uns segundos e clique em Buscar de novo.'
-                : `O Mercado Phone não respondeu (${mpResp.status}). Tente de novo em instantes.` });
+              return res.status(503).json({ erro: await mensagemErroMP(mpResp, 'Tente de novo em instantes.') });
             }
             const body   = await mpResp.json();
             const doPage = body.items || [];
@@ -889,9 +896,7 @@ async function lerVendasMP(chaves, inicio, fim) {
       const params = new URLSearchParams({ limit: 300, page, dataVendaInicial: inicio, dataVendaFinal: fimMais1 });
       const resp = await mpFetch(`${MP_BASE}/sales/history?${params}`, chave.api_key);
       if (!resp.ok) {
-        const err = new Error(resp.status === 429
-          ? 'O Mercado Phone está limitando as consultas agora. Aguarde uns segundos e tente de novo.'
-          : `O Mercado Phone não respondeu (${resp.status}). Tente de novo em instantes.`);
+        const err = new Error(await mensagemErroMP(resp));
         err.status = 503;
         throw err;
       }

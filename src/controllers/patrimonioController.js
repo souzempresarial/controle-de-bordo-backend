@@ -24,7 +24,13 @@ async function mpFetch(path, apiKey, tentativas = 2) {
     await new Promise(ok => setTimeout(ok, 4300));
     return mpFetch(path, apiKey, tentativas - 1);
   }
-  if (!r.ok) throw new Error(`Mercado Phone respondeu ${r.status}`);
+  if (!r.ok) {
+    // Motivo do MP (ex.: sistema bloqueado por validade vencida) vai até a tela
+    const detalhe = String((await r.json().catch(() => ({}))).detail || '').trim();
+    const err = new Error(`Mercado Phone respondeu ${r.status}${detalhe ? ': ' + detalhe : ''}`);
+    if (detalhe) err.mensagemUsuario = `O Mercado Phone recusou a consulta: ${detalhe.replace(/\s+/g, ' ')}`;
+    throw err;
+  }
   return r.json();
 }
 
@@ -186,7 +192,7 @@ async function preview(req, res) {
     res.json(resposta);
   } catch (err) {
     console.error('[patrimonio.preview]', err.message);
-    res.status(502).json({ erro: 'Não consegui ler o estoque do Mercado Phone agora. Tente de novo em instantes.' });
+    res.status(502).json({ erro: err.mensagemUsuario || 'Não consegui ler o estoque do Mercado Phone agora. Tente de novo em instantes.' });
   }
 }
 
