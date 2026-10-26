@@ -41,6 +41,12 @@ function ehPagamentoAparelho(p) {
   return normalizar(p.formaPagamentoDescricao).includes('aparelho');
 }
 
+// "PIX FORNECEDOR": o cliente pagou direto ao fornecedor da loja. É venda (entrada), mas o dinheiro não passou
+// pelo caixa: vira também uma saída de pagamento a fornecedor, para o saldo bater com o banco
+function ehPixFornecedor(p) {
+  return normalizar(p.formaPagamentoDescricao).includes('fornecedor');
+}
+
 // Nomes variam por loja ("PIX - SICOOB", "CREDITO STONE", "STONE"...).
 // Maquininha sem crédito/débito no nome só é Crédito quando parcelado; senão fica pro lojista escolher.
 function mapFormaVenda(descricao, parcela) {
@@ -509,6 +515,7 @@ async function preview(req, res) {
       const pagDinheiro   = pagamentos.filter(p => !ehPagamentoAparelho(p));
       const pagMaior      = pagDinheiro.reduce((m, p) => (!m || parseFloat(p.valor) > parseFloat(m.valor) ? p : m), null);
       const pagamentoStr  = pagMaior ? mapFormaVenda(pagMaior.formaPagamentoDescricao, pagMaior.parcela) : '';
+      const pixFornecedor = ehPrincipal ? pagamentos.filter(ehPixFornecedor).reduce((s, p) => s + parseFloat(p.valor || 0), 0) : 0;
       const valorAparel   = ehPrincipal
         ? pagamentos.filter(ehPagamentoAparelho).reduce((s, p) => s + parseFloat(p.valor || 0), 0)
         : 0;
@@ -540,6 +547,7 @@ async function preview(req, res) {
         desconto:          descontoVal > 0 ? descontoVal : null,
         deducaoSugerida,
         categoriaPeloHistorico: !!hist && !brindeGratis,
+        pixFornecedor:     pixFornecedor > 0 ? Math.round(pixFornecedor * 100) / 100 : null,
         isUpgrade:         valorAparel > 0,
         valorUpgrade:      valorAparel > 0 ? valorAparel : '',
         resumoPagamentos:  ehPrincipal && pagamentos.length ? resumirPagamentos(pagamentos) : '',
@@ -571,7 +579,8 @@ async function importar(req, res) {
 
       const upgradeVal  = t.valorUpgrade && parseFloat(t.valorUpgrade) > 0 ? parseFloat(t.valorUpgrade) : null;
       const isDowngrade = upgradeVal != null && upgradeVal > t.valor;
-      const grupoId     = (t.cmvValor > 0 || isDowngrade) ? `g${Date.now()}${t.mpVendaId}` : null;
+      const pixForn     = parseFloat(t.pixFornecedor) > 0 ? parseFloat(t.pixFornecedor) : 0;
+      const grupoId     = (t.cmvValor > 0 || isDowngrade || pixForn) ? `g${Date.now()}${t.mpVendaId}` : null;
       const mpKey       = t.mpItemKey || String(t.mpVendaId);
       const obs         = `[MP-${mpKey}]${t.vendedorNome ? ' ' + t.vendedorNome : ''}${t.resumoPagamentos ? ' | Pagamentos: ' + t.resumoPagamentos : ''}`;
 
@@ -608,6 +617,16 @@ async function importar(req, res) {
            'Downgrade — ' + (t.descricao || ''), t.pagamento || null,
            t.status || 'Confirmado',
            `Downgrade vinculado ao MP-${t.mpVendaId}`, grupoId]
+        );
+      }
+
+      if (pixForn) {
+        await pool.query(
+          `INSERT INTO lancamentos
+            (cliente_id, tipo, valor, data, categoria, subcategoria, descricao, pagamento, status, obs, grupo_id, is_cmv)
+           VALUES ($1,'Saída',$2,$3,'Fornecedores (Estoque)','Pix Fornecedor',$4,'Pix',$5,$6,$7,false)`,
+          [clienteId, pixForn, t.data, 'PIX do cliente direto ao fornecedor — ' + (t.descricao || ''),
+           t.status || 'Confirmado', `Pix fornecedor vinculado ao MP-${t.mpVendaId}`, grupoId]
         );
       }
 
@@ -937,12 +956,13 @@ async function calcularAjustes(clienteId, inicio, fim) {
   const { rows: saidas } = await pool.query(
     `SELECT id, descricao, valor::float, subcategoria, obs, grupo_id, is_cmv
      FROM lancamentos WHERE cliente_id = $1 AND tipo = 'Saída' AND obs = ANY($2)`,
-    [clienteId, vendaIds.flatMap(v => [`CMV vinculado ao MP-${v}`, `Downgrade vinculado ao MP-${v}`])]
+    [clienteId, vendaIds.flatMap(v => [`CMV vinculado ao MP-${v}`, `Downgrade vinculado ao MP-${v}`, `Pix fornecedor vinculado ao MP-${v}`])]
   );
-  // CMV/downgrade gravados junto com a entrada: mesmo grupo e descrição "CMV — <descrição da entrada>"
+  // CMV/downgrade/Pix fornecedor gravados junto com a entrada: mesmo grupo e descrição "<tipo> — <descrição da entrada>".
+  // Venda cancelada ou item removido no MP leva as três junto
   const vinculadas = l => saidas.filter(s =>
     s.obs.endsWith(`MP-${vendaDe(l)}`) && s.grupo_id === l.grupo_id &&
-    (s.descricao === `CMV — ${l.descricao || ''}` || s.descricao === `Downgrade — ${l.descricao || ''}`));
+    [`CMV — ${l.descricao || ''}`, `Downgrade — ${l.descricao || ''}`, `PIX do cliente direto ao fornecedor — ${l.descricao || ''}`].includes(s.descricao));
 
   const { itens, statusVenda } = await lerVendasMP(chaves, inicio, fim);
   const mpPorChave = new Map(itens.map(i => [i._key, i]));
