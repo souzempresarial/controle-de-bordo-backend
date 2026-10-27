@@ -325,6 +325,12 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
 
   // ── CRIAR LANÇAMENTO ──────────────────────────────────────────────────────
   if (intent_type === 'criar_entrada' || intent_type === 'criar_saida') {
+    // Funcionário só lança se tiver a mesma permissão exigida na tela de Conciliações
+    if (Array.isArray(telasLiberadas) && !telasLiberadas.includes('lancamentos')) {
+      console.log('[Agent][3] Lançamento bloqueado: funcionário sem permissão de lançamentos');
+      return { resposta: 'Seu acesso não permite registrar lançamentos. Peça ao responsável da loja para liberar Conciliações Bancárias.', acao: null };
+    }
+
     const valorNum = normalizeValor(dados.valor);
     console.log('[Agent][3] Tool: criarLancamento | valor normalizado:', valorNum, '| data raw:', dados.data);
 
