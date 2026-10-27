@@ -196,11 +196,14 @@ NÃO USE consultar_analytics para:
 TOOL 5 — consultar_mercadophone
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 O QUE FAZ: Consulta direto no Mercado Phone (sistema de vendas da loja) e devolve a resposta pronta, com os números já calculados.
-QUANDO USAR (só estas 4 consultas):
+QUANDO USAR (só estas 7 consultas):
 - "estoque_parado": aparelhos parados, estoque encalhado, o que não sai, dinheiro parado em estoque, há quanto tempo um aparelho está na loja. "dias" = mínimo de dias parado (padrão 60).
 - "ranking_vendedores": quem vendeu mais, ranking/desempenho de vendedores, quanto um vendedor vendeu. Período em start_date/end_date (padrão: mês atual).
 - "melhores_clientes": melhores clientes, quem mais compra, clientes que mais gastaram. "meses" = janela (padrão 6).
 - "clientes_sumidos": clientes que pararam de comprar, sumiram, para chamar de volta / fazer campanha. "dias" = dias sem comprar (padrão 90).
+- "hora_upgrade": clientes prontos para trocar de aparelho, upgrade maduro, quem comprou aparelho há muito tempo e não trocou, pra quem oferecer troca. "meses" = há quantos meses comprou, no mínimo (padrão 12).
+- "historico_cliente": o que um cliente específico já comprou, histórico, quanto ele gastou, telefone ou aniversário de um cliente. "cliente" = nome citado (obrigatório).
+- "aniversariantes": clientes que fazem aniversário num mês, para mandar mensagem ou cupom. "mes" = número do mês (padrão: mês atual).
 NÃO USE para faturamento/lucro da loja (consultar_analytics) nem para listar lançamentos (consultar_entrada/saida).
 "analise": true quando a pessoa quer saber O QUE FAZER com o resultado (dica, estratégia, como resolver, como melhorar — ex: "como eu giro esse estoque parado?", "o que faço pra vender mais?"). Assim os números vêm junto com as ações. Só o dado → false.
 
@@ -208,14 +211,16 @@ NÃO USE para faturamento/lucro da loja (consultar_analytics) nem para listar la
   "intent_type": "consultar_mercadophone",
   "body": "Consultando o Mercado Phone...",
   "data": {
-    "consulta": "estoque_parado" | "ranking_vendedores" | "melhores_clientes" | "clientes_sumidos",
+    "consulta": "estoque_parado" | "ranking_vendedores" | "melhores_clientes" | "clientes_sumidos" | "hora_upgrade" | "historico_cliente" | "aniversariantes",
     "analise": true | false,
     "start_date": "YYYY-MM-DD" | null,
     "end_date": "YYYY-MM-DD" | null,
     "periodo": "texto legível do período — ex: de outubro, desta semana" | null,
     "dias": número | null,
     "meses": número | null,
-    "vendedor": "nome do vendedor citado" | null
+    "vendedor": "nome do vendedor citado" | null,
+    "cliente": "nome do cliente citado" | null,
+    "mes": número de 1 a 12 | null
   }
 }
 
@@ -227,6 +232,11 @@ EXEMPLOS:
 - "quem são meus melhores clientes?" → consulta: melhores_clientes
 - "quais clientes sumiram?" / "pra quem eu mando promoção?" → consulta: clientes_sumidos
 - "o que eu faço pra eliminar o estoque parado?" → consulta: estoque_parado, analise: true
+- "quem tá pronto pra trocar de iPhone?" / "pra quem eu ofereço upgrade?" → consulta: hora_upgrade
+- "quem comprou aparelho há mais de 18 meses?" → consulta: hora_upgrade, meses: 18
+- "o que o João Silva já comprou aqui?" → consulta: historico_cliente, cliente: "João Silva"
+- "quem faz aniversário esse mês?" → consulta: aniversariantes
+- "aniversariantes de dezembro" → consulta: aniversariantes, mes: 12
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL 6 — consultar_loja

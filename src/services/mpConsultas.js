@@ -56,8 +56,13 @@ async function chavesDoCliente(clienteId) {
 
 // Mesmo valor que a importação usa: o faturamento do MP (valorTotal); item que saiu de graça vale 0
 const valorItem = i => (i.valorCliente !== '' && i.valorCliente != null && +i.valorCliente === 0 ? 0 : +i.valorTotal || 0);
-const ehAparelho = (tipo, desc, imei) =>
-  !!imei || /celular|iphone|smartphone|aparelho|macbook|ipad|tablet|watch|airpods|notebook/.test(norm(`${tipo} ${desc}`));
+// Sem IMEI, acessório "para iPhone" (ex.: "Capinha Aveludada (Iphone)") não é aparelho
+const ACESSORIO = /capa|capinha|case|pelicula|cabo|fonte|carregador|fone|acessorio|suporte|pulseira|adaptador|bateria|chip|cartao de memoria/;
+const ehAparelho = (tipo, desc, imei) => {
+  if (imei) return true;
+  const t = norm(`${tipo} ${desc}`);
+  return !ACESSORIO.test(t) && /celular|iphone|smartphone|aparelho|macbook|ipad|tablet|watch|airpods|notebook/.test(t);
+};
 // Peça e serviço (ex.: bateria de iPhone 11) não são aparelho, mesmo com "iphone" na descrição
 const ehPecaOuServico = i => i.snPeca === 1 || i.snServico === 1 || /peca|servico/.test(norm(i.tipoProdutoDescricao));
 // Cliente de balcão sem cadastro não entra em ranking de clientes
@@ -70,30 +75,50 @@ async function emLotes(tarefas, n = 4) {
   return res;
 }
 
-// Vendas concluídas num período, compactas, com cache (12 meses de loja grande são milhares de itens)
-async function vendasPeriodo(clienteId, chaves, ini, fim) {
-  const chave = `mp:ia:vendas:${clienteId}:${ini}:${fim}`;
+// Vendas concluídas num período, compactas. Cache por mês: mês fechado não muda (7 dias de cache) e só o mês
+// atual é relido; assim 2 anos de vendas de uma loja grande cabem no Redis e no tempo do chat
+const TTL_MES_FECHADO = 7 * 24 * 3600;
+const TTL_MES_ATUAL   = 3 * 3600;
+const compactar = i => ({
+  v: String(i.vendaId), d: String(i.dataVenda || '').slice(0, 10), vend: String(i.vendedorNome || '').trim(),
+  cid: i.clienteId || null, cli: String(i.clienteNome || '').trim(), fat: valorItem(i), custo: +i.valorCusto || 0,
+  q: +i.quantidade || 1, ap: ehAparelho(i.tipoProdutoDescricao, i.aparelhoDescricao, i.imei1) ? 1 : 0,
+  p: [String(i.aparelhoDescricao || i.produtoDescricao || '').replace(/\s+/g, ' ').trim(), i.gbDescricao].filter(Boolean).join(' ').slice(0, 50),
+});
+
+async function vendasDoMes(clienteId, chaves, mes) {
+  const hoje = hojeISO();
+  const atual = mes === hoje.slice(0, 7);
+  const chave = `mp:ia:vm2:${clienteId}:${mes}`;
   const cache = await redis.get(chave).catch(() => null);
   if (Array.isArray(cache)) return cache;
-
-  // Um mês por vez em paralelo: cada mês pagina sozinho
-  const meses = [];
-  for (let d = new Date(`${ini.slice(0, 7)}-01T12:00:00`); d.toISOString().slice(0, 10) <= fim; d.setMonth(d.getMonth() + 1)) {
-    const a = d.toISOString().slice(0, 7);
-    const mIni = a === ini.slice(0, 7) ? ini : `${a}-01`;
-    const ult = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
-    meses.push([mIni, ult < fim ? ult : fim]);
-  }
-  const lotes = await emLotes(chaves.flatMap(k => meses.map(([a, b]) => () =>
-    lerTudo(p => `/sales/history?limit=${POR_PAGINA}&page=${p}&dataVendaInicial=${a}&dataVendaFinal=${b}`, k.api_key, 20)
-      .then(itens => itens.filter(i => norm(i.statusVenda) === 'concluido' && String(i.dataVenda || '').slice(0, 10) <= b)))), 3);
-  const vendas = lotes.flat().map(i => ({
-    v: String(i.vendaId), d: String(i.dataVenda || '').slice(0, 10), vend: String(i.vendedorNome || '').trim(),
-    cid: i.clienteId || null, cli: String(i.clienteNome || '').trim(), fat: valorItem(i), custo: +i.valorCusto || 0,
-    q: +i.quantidade || 1, ap: ehAparelho(i.tipoProdutoDescricao, i.aparelhoDescricao, i.imei1) ? 1 : 0,
-  }));
-  if (JSON.stringify(vendas).length < 900 * 1024) await redis.set(chave, vendas, { ex: CACHE_TTL }).catch(() => {});
+  const [y, m] = mes.split('-').map(Number);
+  const fimMes = atual ? hoje : new Date(y, m, 0).toLocaleDateString('sv-SE');
+  const lotes = await emLotes(chaves.map(k => () =>
+    lerTudo(p => `/sales/history?limit=${POR_PAGINA}&page=${p}&dataVendaInicial=${mes}-01&dataVendaFinal=${fimMes}`, k.api_key, 20)), 2);
+  const vendas = lotes.flat()
+    .filter(i => norm(i.statusVenda) === 'concluido' && String(i.dataVenda || '').slice(0, 7) === mes)
+    .map(compactar);
+  if (JSON.stringify(vendas).length < 900 * 1024) await redis.set(chave, vendas, { ex: atual ? TTL_MES_ATUAL : TTL_MES_FECHADO }).catch(() => {});
   return vendas;
+}
+
+async function vendasPeriodo(clienteId, chaves, ini, fim) {
+  const meses = [];
+  for (let d = new Date(`${ini.slice(0, 7)}-01T12:00:00`); d.toISOString().slice(0, 7) <= fim.slice(0, 7); d.setMonth(d.getMonth() + 1)) meses.push(d.toISOString().slice(0, 7));
+  const porMes = await emLotes(meses.map(m => () => vendasDoMes(clienteId, chaves, m)), 3);
+  return porMes.flat().filter(i => i.d >= ini && i.d <= fim);
+}
+
+// Cadastro de clientes do MP (telefone e aniversário), compacto e em cache
+async function cadastroClientes(clienteId, chaves) {
+  const chave = `mp:ia:clientes:${clienteId}`;
+  const cache = await redis.get(chave).catch(() => null);
+  if (Array.isArray(cache)) return cache;
+  const todos = (await emLotes(chaves.map(k => () => lerTudo(p => `/customers?limit=${POR_PAGINA}&page=${p}`, k.api_key, 30)), 1)).flat()
+    .map(c => ({ id: c.id, nome: String(c.nome || '').trim(), tel: String(c.telefone || '').trim(), nasc: c.dataNascimento ? String(c.dataNascimento).slice(0, 10) : null }));
+  if (JSON.stringify(todos).length < 900 * 1024) await redis.set(chave, todos, { ex: CACHE_TTL }).catch(() => {});
+  return todos;
 }
 
 // "IPHONE 17 PRO MAX" sozinho não diz qual é: junta GB e cor da descrição completa e o final do IMEI
@@ -240,8 +265,8 @@ async function clientesSumidos(clienteId, chaves, diasSem = 90, palavrasLoja = [
   const ids = new Set(sumidos.flatMap(c => c.cids));
   if (ids.size) {
     try {
-      const clientes = (await emLotes(chaves.map(k => () => lerTudo(p => `/customers?limit=${POR_PAGINA}&page=${p}`, k.api_key, 30)), 1)).flat();
-      const tel = new Map(clientes.filter(c => ids.has(c.id)).map(c => [c.id, String(c.telefone || '').trim()]));
+      const clientes = await cadastroClientes(clienteId, chaves);
+      const tel = new Map(clientes.filter(c => ids.has(c.id)).map(c => [c.id, c.tel]));
       sumidos.forEach(c => { c.telefone = c.cids.map(id => tel.get(id)).find(Boolean) || ''; });
     } catch { /* sem telefone a lista continua valendo */ }
   }
@@ -253,6 +278,88 @@ function textoSumidos(r) {
   const linhas = [`📞 Clientes que mais gastaram e não compram há ${r.diasSem}+ dias (últimos 12 meses):`];
   r.sumidos.forEach((c, i) => linhas.push(`${i + 1}. ${c.nome} — ${brl0(c.total)} em ${c.compras} compra${c.compras !== 1 ? 's' : ''} · última em ${dataBR(c.ultima)} (${diasEntre(c.ultima, hojeISO())} dias)${c.telefone ? ` · ${c.telefone}` : ''}`));
   linhas.push('', 'Vale um contato: são clientes que já confiaram na loja.');
+  return linhas.join('\n');
+}
+
+// ── 5. Hora do upgrade ───────────────────────────────────────────────────────────
+// Quem comprou aparelho entre `meses` e `meses + 12` meses atrás e não comprou outro aparelho desde então
+async function horaUpgrade(clienteId, chaves, meses = 12, palavrasLoja = []) {
+  const hoje = hojeISO();
+  const corte = new Date(`${hoje}T12:00:00`); corte.setMonth(corte.getMonth() - meses);
+  const inicio = new Date(corte); inicio.setMonth(inicio.getMonth() - 12);
+  const [ini, lim] = [inicio.toLocaleDateString('sv-SE'), corte.toLocaleDateString('sv-SE')];
+  const aparelhos = (await vendasPeriodo(clienteId, chaves, ini, hoje)).filter(i => i.ap && !clienteGenerico(i.cli)
+    && !palavrasLoja.some(p => norm(i.cli).split(/[^a-z0-9]+/).includes(p)));
+  // Última compra de aparelho de cada cliente: se foi depois do corte, ele já trocou
+  const ultimo = new Map();
+  for (const i of aparelhos) { const k = norm(i.cli); if (!ultimo.has(k) || ultimo.get(k).d < i.d) ultimo.set(k, i); }
+  const lista = [...ultimo.values()].filter(i => i.d <= lim).sort((a, b) => b.fat - a.fat);
+  // Loja que começou a usar o MP há pouco não tem venda tão antiga: usa a maior janela que existe (mínimo 6 meses)
+  const primeira = aparelhos.reduce((m, i) => (!m || i.d < m ? i.d : m), null);
+  const mesesDeHistorico = primeira ? Math.floor(diasEntre(primeira, hoje) / 30.4) : 0;
+  if (!lista.length && meses > 6 && mesesDeHistorico >= 7 && mesesDeHistorico <= meses) {
+    const r = await horaUpgrade(clienteId, chaves, Math.max(6, mesesDeHistorico - 1), palavrasLoja);
+    return { ...r, pedido: meses, primeira };
+  }
+  const clientes = await cadastroClientes(clienteId, chaves).catch(() => []);
+  const tel = new Map(clientes.map(c => [c.id, c.tel]));
+  return { meses, total: lista.length, primeira, lista: lista.slice(0, 15).map(i => ({ ...i, tel: tel.get(i.cid) || '' })) };
+}
+
+function textoUpgrade(r) {
+  const desde = r.primeira ? ` (as vendas de aparelho no MP começam em ${dataBR(r.primeira)})` : '';
+  if (!r.lista.length) return `Nenhum cliente comprou aparelho entre ${r.meses} e ${r.meses + 12} meses atrás sem ter voltado para comprar outro${desde}.`;
+  const linhas = [];
+  if (r.pedido) linhas.push(`Ninguém com ${r.pedido}+ meses ainda${desde}. Usei ${r.meses}+ meses, a maior janela que existe:`, '');
+  linhas.push(`📱 ${r.total} cliente${r.total !== 1 ? 's' : ''} com upgrade maduro (compraram aparelho há ${r.meses}+ meses e não trocaram desde então)${r.total > r.lista.length ? `; os ${r.lista.length} de maior compra` : ''}:`);
+  r.lista.forEach((i, n) => linhas.push(`${n + 1}. ${i.cli} — ${i.p || 'aparelho'} · ${brl0(i.fat)} em ${dataBR(i.d)} (${Math.round(diasEntre(i.d, hojeISO()) / 30)} meses)${i.tel ? ` · ${i.tel}` : ''}`));
+  linhas.push('', 'Boa lista para oferecer troca com o aparelho dele como entrada.');
+  return linhas.join('\n');
+}
+
+// ── 6. Histórico de um cliente ──────────────────────────────────────────────────
+async function historicoCliente(clienteId, chaves, nome) {
+  const hoje = hojeISO();
+  const d = new Date(`${hoje}T12:00:00`); d.setMonth(d.getMonth() - 24); d.setDate(1);
+  const alvo = norm(nome).split(/\s+/).filter(Boolean);
+  const vendas = (await vendasPeriodo(clienteId, chaves, d.toLocaleDateString('sv-SE'), hoje))
+    .filter(i => alvo.length && alvo.every(p => norm(i.cli).includes(p)));
+  const nomes = [...new Set(vendas.map(i => i.cli))];
+  const clientes = await cadastroClientes(clienteId, chaves).catch(() => []);
+  const cad = clientes.find(c => vendas.some(v => v.cid === c.id)) || clientes.find(c => alvo.length && alvo.every(p => norm(c.nome).includes(p)));
+  return { nome, nomes, vendas: vendas.sort((a, b) => b.d.localeCompare(a.d)), cad };
+}
+
+function textoHistorico(r) {
+  if (!r.vendas.length) return `Não achei compras de "${r.nome}" nos últimos 24 meses no Mercado Phone.${r.cad ? ` O cadastro existe (${r.cad.nome}${r.cad.tel ? `, ${r.cad.tel}` : ''}), mas sem compra nesse período.` : ''}`;
+  if (r.nomes.length > 3) return `Achei ${r.nomes.length} clientes com "${r.nome}" no nome: ${r.nomes.slice(0, 8).join(', ')}. Me diga o nome completo.`;
+  const compras = new Set(r.vendas.map(i => i.v));
+  const total = r.vendas.reduce((a, i) => a + i.fat, 0);
+  const linhas = [`🧾 ${r.nomes.join(' / ')} — ${compras.size} compra${compras.size !== 1 ? 's' : ''} nos últimos 24 meses, ${brl0(total)} no total (ticket ${brl0(total / compras.size)}).`];
+  const contato = r.cad ? [r.cad.tel && `Telefone: ${r.cad.tel}`, r.cad.nasc && `Aniversário: ${r.cad.nasc.slice(8, 10)}/${r.cad.nasc.slice(5, 7)}`].filter(Boolean).join(' · ') : '';
+  if (contato) linhas.push(contato);
+  linhas.push('');
+  r.vendas.slice(0, 12).forEach(i => linhas.push(`• ${dataBR(i.d)} — ${i.p || 'item'}${i.q > 1 ? ` × ${i.q}` : ''} — ${brl0(i.fat)}${i.vend ? ` (${i.vend})` : ''}`));
+  if (r.vendas.length > 12) linhas.push(`… e mais ${r.vendas.length - 12} itens`);
+  return linhas.join('\n');
+}
+
+// ── 7. Aniversariantes ──────────────────────────────────────────────────────────
+async function aniversariantes(clienteId, chaves, mes) {
+  const clientes = await cadastroClientes(clienteId, chaves);
+  const mm = String(mes).padStart(2, '0');
+  const lista = clientes.filter(c => c.nasc && c.nasc.slice(5, 7) === mm && !clienteGenerico(c.nome))
+    .sort((a, b) => a.nasc.slice(8, 10).localeCompare(b.nasc.slice(8, 10)));
+  return { mes: Number(mes), lista, comData: clientes.filter(c => c.nasc).length, base: clientes.length };
+}
+
+function textoAniversariantes(r) {
+  const nomeMes = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'][r.mes - 1];
+  if (!r.lista.length) return `Nenhum cliente com aniversário em ${nomeMes} no cadastro do Mercado Phone (${r.comData} de ${r.base} clientes têm data de nascimento).`;
+  const linhas = [`🎂 ${r.lista.length} aniversariante${r.lista.length !== 1 ? 's' : ''} em ${nomeMes}:`];
+  r.lista.slice(0, 25).forEach(c => linhas.push(`• ${c.nasc.slice(8, 10)}/${c.nasc.slice(5, 7)} — ${c.nome}${c.tel ? ` · ${c.tel}` : ''}`));
+  if (r.lista.length > 25) linhas.push(`… e mais ${r.lista.length - 25}`);
+  linhas.push('', `Só ${r.comData} de ${r.base} clientes têm a data de nascimento no MP: vale pedir no cadastro da venda.`);
   return linhas.join('\n');
 }
 
@@ -272,8 +379,11 @@ async function consultarMercadoPhone(clienteId, dados = {}) {
     return textoRanking(await rankingVendedores(clienteId, chaves, ini, fim), dados.periodo, dados.vendedor);
   }
   if (consulta === 'melhores_clientes') return textoMelhores(await melhoresClientes(clienteId, chaves, num(dados.meses, 6, 1, 12), palavrasLoja));
+  if (consulta === 'hora_upgrade') return textoUpgrade(await horaUpgrade(clienteId, chaves, num(dados.meses, 12, 6, 36), palavrasLoja));
+  if (consulta === 'historico_cliente') return dados.cliente ? textoHistorico(await historicoCliente(clienteId, chaves, dados.cliente)) : 'De qual cliente você quer ver o histórico?';
+  if (consulta === 'aniversariantes') return textoAniversariantes(await aniversariantes(clienteId, chaves, num(dados.mes, Number(hojeISO().slice(5, 7)), 1, 12)));
   if (consulta === 'clientes_sumidos') return textoSumidos(await clientesSumidos(clienteId, chaves, num(dados.dias, 90, 30, 330), palavrasLoja));
-  return 'Consigo consultar no Mercado Phone: estoque parado, ranking de vendedores, melhores clientes e clientes sumidos. Qual delas você quer?';
+  return 'Consigo consultar no Mercado Phone: estoque parado, ranking de vendedores, melhores clientes, clientes sumidos, clientes com upgrade maduro, histórico de um cliente e aniversariantes. Qual delas você quer?';
 }
 
-module.exports = { consultarMercadoPhone, estoqueParado, rankingVendedores, melhoresClientes, clientesSumidos, lerTudo, chavesDoCliente, vendasPeriodo, ehPecaOuServico };
+module.exports = { consultarMercadoPhone, estoqueParado, rankingVendedores, melhoresClientes, clientesSumidos, lerTudo, chavesDoCliente, vendasPeriodo, ehPecaOuServico, cadastroClientes, ehAparelho };

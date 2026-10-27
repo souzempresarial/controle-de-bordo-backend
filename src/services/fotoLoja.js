@@ -1,6 +1,6 @@
 const redis = require('./redis');
 const { dreMensal, textoDRE } = require('./dre');
-const { lerTudo, chavesDoCliente, vendasPeriodo, estoqueParado, ehPecaOuServico } = require('./mpConsultas');
+const { lerTudo, chavesDoCliente, vendasPeriodo, estoqueParado, ehPecaOuServico, cadastroClientes, ehAparelho } = require('./mpConsultas');
 
 // "Foto da loja": o resumo que o SOUZ AI recebe quando a pergunta não cabe numa consulta pronta.
 // Junta o DRE do SOUZ com estoque, vendas do mês, contas em aberto e OS do Mercado Phone, já calculados.
@@ -30,7 +30,7 @@ async function resumoEstoque(chaves) {
     const q = +i.quantidade || 0;
     if (i.excluido || q <= 0 || ehPecaOuServico(i)) continue;
     const imei = String(i.imei || '').trim();
-    const aparelho = !!imei || /celular|iphone|smartphone|aparelho|macbook|ipad|tablet|watch|airpods|notebook/i.test(`${i.tipoProdutoDescricao} ${i.aparelhoDescricao}`);
+    const aparelho = ehAparelho(i.tipoProdutoDescricao, i.aparelhoDescricao, imei);
     if (aparelho) {
       const ent = String(i.dataEntrada || '').slice(0, 10), ult = String(i.dataUltimaVenda || '').slice(0, 10);
       if (q <= 1 && ult && ent && ult >= ent) continue;
@@ -171,7 +171,15 @@ async function atualizarFotos() {
   const { rows } = await pool.query('SELECT DISTINCT cliente_id FROM mercadophone_chaves WHERE ativa = true');
   const resultado = { ok: 0, erro: 0 };
   for (const { cliente_id } of rows) {
-    try { await fotoDaLoja(cliente_id, { forcar: true, limiteMP: 120000 }); resultado.ok++; }
+    try {
+      await fotoDaLoja(cliente_id, { forcar: true, limiteMP: 120000 });
+      // Aquece o que as consultas de clientes usam: 24 meses de vendas (mês fechado fica 7 dias em cache) e o cadastro
+      const chaves = await chavesDoCliente(cliente_id);
+      const d = new Date(); d.setMonth(d.getMonth() - 25); d.setDate(1);
+      await vendasPeriodo(cliente_id, chaves, d.toLocaleDateString('sv-SE'), hojeISO());
+      await cadastroClientes(cliente_id, chaves);
+      resultado.ok++;
+    }
     catch (err) { console.error('[fotoLoja] job', cliente_id, err.message); resultado.erro++; }
   }
   return resultado;
