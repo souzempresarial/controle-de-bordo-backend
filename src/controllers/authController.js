@@ -115,6 +115,11 @@ async function loginGoogle(req, res) {
 
     const { email, name } = info;
     if (!email) return res.status(401).json({ erro: 'E-mail não disponível' });
+    // Sem e-mail confirmado pelo Google, o token não prova que a pessoa é dona do endereço
+    if (String(info.email_verified) !== 'true') {
+      registrarFalha(email, ipDe(req), 'google_email_nao_verificado');
+      return res.status(401).json({ erro: 'Este e-mail ainda não foi confirmado no Google.' });
+    }
 
     // Google só entra em conta já criada pelo admin; não cria conta nova
     const { rows } = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.toLowerCase()]);
@@ -128,6 +133,17 @@ async function loginGoogle(req, res) {
     if (usuario.ativo === false) {
       registrarFalha(email, ipDe(req), 'conta_inativa');
       return res.status(403).json({ erro: msgContaInativa(usuario) });
+    }
+
+    // Conta com e-mail nunca confirmado: o Google acabou de provar quem é o dono. A senha que existia foi criada
+    // por alguém que não provou o e-mail (pode ser outra pessoa que se cadastrou antes) e deixa de valer;
+    // o dono cria a dele em "Esqueci minha senha"
+    if (!usuario.email_verificado) {
+      const senhaDescartada = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+      await pool.query(
+        'UPDATE usuarios SET email_verificado = true, token_verificacao = null, token_expira_em = null, senha_hash = $1 WHERE id = $2',
+        [senhaDescartada, usuario.id]
+      );
     }
 
     const token = jwt.sign(
@@ -252,10 +268,35 @@ async function login(req, res) {
 
 // ─── Cadastro público ─────────────────────────────────────────────────────────
 
+// O rateLimit do server.js conta por instância do Lambda; este limite vale para todas, guardado no Redis.
+// Cada cadastro cria uma loja e manda e-mail para o endereço digitado: sem teto, vira spam e lixo no banco
+const CADASTROS_POR_IP_HORA    = 3;
+const CADASTROS_GLOBAIS_HORA   = 30;
+async function cadastroLiberado(ip) {
+  const redis = require('../services/redis');
+  const hora = new Date().toISOString().slice(0, 13);
+  try {
+    const [porIp, total] = await Promise.all([
+      redis.incr(`cadastro:ip:${ip}:${hora}`),
+      redis.incr(`cadastro:total:${hora}`),
+    ]);
+    await Promise.all([redis.expire(`cadastro:ip:${ip}:${hora}`, 3600), redis.expire(`cadastro:total:${hora}`, 3600)]);
+    return porIp <= CADASTROS_POR_IP_HORA && total <= CADASTROS_GLOBAIS_HORA;
+  } catch {
+    return true; // Redis fora do ar não bloqueia cadastro legítimo; o limite por instância continua valendo
+  }
+}
+
 async function registrarPublico(req, res) {
   const { nome, email, senha } = req.body;
   if (!nome || !email || !senha) return res.status(400).json({ erro: 'Nome, e-mail e senha obrigatórios' });
+  if (typeof nome !== 'string' || typeof email !== 'string' || typeof senha !== 'string' || nome.length > 120 || email.length > 255 || senha.length > 200) {
+    return res.status(400).json({ erro: 'Dados de cadastro inválidos' });
+  }
   if (senha.length < 6) return res.status(400).json({ erro: 'Senha deve ter no mínimo 6 caracteres' });
+  if (!await cadastroLiberado(ipDe(req))) {
+    return res.status(429).json({ erro: 'Muitos cadastros em pouco tempo. Tente de novo em 1 hora.' });
+  }
 
   const hash  = await bcrypt.hash(senha, 10);
   const token = crypto.randomBytes(32).toString('hex');

@@ -1,14 +1,17 @@
 const pool = require('../models/db');
 
+// Colunas devolvidas ao front: nunca a chave antiga do MP (mercadophone_api_key), que fica em texto puro
+const COLUNAS = 'id, nome, cor, obs, regras, simulador_cfg, criado_em';
+
 // Listar todos os clientes (admin) ou apenas o próprio (cliente)
 async function listar(req, res) {
   try {
     if (req.usuario.papel === 'admin') {
-      const result = await pool.query('SELECT * FROM clientes ORDER BY nome');
+      const result = await pool.query(`SELECT ${COLUNAS} FROM clientes ORDER BY nome`);
       return res.json(result.rows);
     }
     // Cliente só vê a si mesmo
-    const result = await pool.query('SELECT * FROM clientes WHERE id = $1', [req.usuario.clienteId]);
+    const result = await pool.query(`SELECT ${COLUNAS} FROM clientes WHERE id = $1`, [req.usuario.clienteId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ erro: 'Erro interno' });
@@ -23,7 +26,7 @@ async function buscar(req, res) {
     if (papel !== 'admin' && req.usuario.clienteId !== parseInt(id)) {
       return res.status(403).json({ erro: 'Acesso negado' });
     }
-    const result = await pool.query('SELECT * FROM clientes WHERE id = $1', [id]);
+    const result = await pool.query(`SELECT ${COLUNAS} FROM clientes WHERE id = $1`, [id]);
     if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -38,7 +41,7 @@ async function criar(req, res) {
     const { nome, cor, obs } = req.body;
     if (!nome) return res.status(400).json({ erro: 'Nome é obrigatório' });
     const result = await pool.query(
-      'INSERT INTO clientes (nome, cor, obs) VALUES ($1, $2, $3) RETURNING *',
+      `INSERT INTO clientes (nome, cor, obs) VALUES ($1, $2, $3) RETURNING ${COLUNAS}`,
       [nome, cor || null, obs || null]
     );
     res.status(201).json(result.rows[0]);
@@ -55,7 +58,7 @@ async function editar(req, res) {
     const { nome, cor, obs } = req.body;
     if (!nome) return res.status(400).json({ erro: 'Nome é obrigatório' });
     const result = await pool.query(
-      'UPDATE clientes SET nome=$1, cor=$2, obs=$3 WHERE id=$4 RETURNING *',
+      `UPDATE clientes SET nome=$1, cor=$2, obs=$3 WHERE id=$4 RETURNING ${COLUNAS}`,
       [nome, cor || null, obs || null, id]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });
@@ -72,7 +75,7 @@ async function salvarRegras(req, res) {
     const { id } = req.params;
     const regras = String(req.body.regras ?? '').trim();
     const result = await pool.query(
-      'UPDATE clientes SET regras = $1 WHERE id = $2 RETURNING *',
+      `UPDATE clientes SET regras = $1 WHERE id = $2 RETURNING ${COLUNAS}`,
       [regras || null, id]
     );
     if (!result.rows.length) return res.status(404).json({ erro: 'Cliente não encontrado' });

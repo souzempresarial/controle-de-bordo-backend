@@ -18,14 +18,8 @@ CREATE TABLE IF NOT EXISTS mercadophone_chaves (
   ativa      BOOLEAN DEFAULT true,
   criado_em  TIMESTAMP DEFAULT NOW()
 );
--- Migra chave existente para a nova tabela (roda só se ainda não migrou)
-INSERT INTO mercadophone_chaves (cliente_id, nome, api_key)
-SELECT id, 'Principal', mercadophone_api_key
-FROM clientes
-WHERE mercadophone_api_key IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM mercadophone_chaves WHERE cliente_id = clientes.id
-  );
+-- A migração da chave antiga (clientes.mercadophone_api_key) já rodou. Ela não fica mais aqui porque, rodando a
+-- cada inicialização, recriava a chave de uma loja que tinha apagado todas as suas chaves
 
 -- Loja que digita no MP o valor unitário já líquido (sem a taxa): a diferença pro valor de exibição vira dedução
 ALTER TABLE mercadophone_chaves ADD COLUMN IF NOT EXISTS valor_liquido BOOLEAN DEFAULT FALSE;
