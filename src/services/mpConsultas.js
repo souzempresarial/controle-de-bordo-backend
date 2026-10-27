@@ -58,6 +58,8 @@ async function chavesDoCliente(clienteId) {
 const valorItem = i => (i.valorCliente !== '' && i.valorCliente != null && +i.valorCliente === 0 ? 0 : +i.valorTotal || 0);
 const ehAparelho = (tipo, desc, imei) =>
   !!imei || /celular|iphone|smartphone|aparelho|macbook|ipad|tablet|watch|airpods|notebook/.test(norm(`${tipo} ${desc}`));
+// Peça e serviço (ex.: bateria de iPhone 11) não são aparelho, mesmo com "iphone" na descrição
+const ehPecaOuServico = i => i.snPeca === 1 || i.snServico === 1 || /peca|servico/.test(norm(i.tipoProdutoDescricao));
 // Cliente de balcão sem cadastro não entra em ranking de clientes
 const clienteGenerico = nome => !norm(nome) || /consumidor|cliente padr|cliente passante|passante|avulso|nao identificad|nao informad|balcao|^cliente$|^venda$|^loja/.test(norm(nome));
 
@@ -109,11 +111,11 @@ function descricaoAparelho(i) {
 async function estoqueParado(clienteId, chaves, dias = 60) {
   const hoje = hojeISO();
   const itens = (await Promise.all(chaves.map(k => lerTudo(p => `/inventory?limit=${POR_PAGINA}&page=${p}`, k.api_key, 60)))).flat();
-  const parados = [], erros = [];
+  const parados = [], erros = [], imeis = new Set();
   let vendidosSemBaixa = 0;
   for (const i of itens) {
     const q = +i.quantidade || 0;
-    if (i.excluido || q <= 0) continue;
+    if (i.excluido || q <= 0 || ehPecaOuServico(i)) continue;
     const desc = descricaoAparelho(i);
     if (!ehAparelho(i.tipoProdutoDescricao, desc, i.imei) || /pre-?venda/.test(norm(desc))) continue;
     const entrada = i.dataEntrada ? String(i.dataEntrada).slice(0, 10) : null;
@@ -121,6 +123,10 @@ async function estoqueParado(clienteId, chaves, dias = 60) {
     // Aparelho é unidade única: vendido depois de entrar e ainda com quantidade = baixa esquecida no MP
     if (q <= 1 && ultVenda && entrada && ultVenda >= entrada) { vendidosSemBaixa++; continue; }
     if (!entrada) continue;
+    // Mesmo IMEI cadastrado duas vezes no MP é um aparelho só
+    const imei = String(i.imei || '').trim();
+    if (imei && imeis.has(imei)) continue;
+    if (imei) imeis.add(imei);
     const d = diasEntre(entrada, hoje);
     if (d < dias) continue;
     const custo = +i.valorCusto || 0;
@@ -270,4 +276,4 @@ async function consultarMercadoPhone(clienteId, dados = {}) {
   return 'Consigo consultar no Mercado Phone: estoque parado, ranking de vendedores, melhores clientes e clientes sumidos. Qual delas você quer?';
 }
 
-module.exports = { consultarMercadoPhone, estoqueParado, rankingVendedores, melhoresClientes, clientesSumidos };
+module.exports = { consultarMercadoPhone, estoqueParado, rankingVendedores, melhoresClientes, clientesSumidos, lerTudo, chavesDoCliente, vendasPeriodo, ehPecaOuServico };

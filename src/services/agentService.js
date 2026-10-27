@@ -311,11 +311,23 @@ function formatarResultadoConsulta({ rows, quantidade, total, porGrupo = [], por
   return texto;
 }
 
+// Pergunta que caiu na rede de segurança (consultar_loja) ou em "outro": fica registrada para virar consulta pronta depois
+function registrarPergunta(clienteId, usuarioNome, source, intent, mensagem) {
+  pool.query('INSERT INTO ia_perguntas (cliente_id, usuario, canal, intent, pergunta) VALUES ($1, $2, $3, $4, $5)',
+    [clienteId, usuarioNome || null, source, intent, String(mensagem).slice(0, 1000)])
+    .catch(err => console.warn('[Agent] Falha ao registrar pergunta:', err.message));
+}
+
+// O chat roda no API Gateway, que corta em 29s: a resposta escrita usa o tempo que sobrou
+const PRAZO_TOTAL_MS = 27000;
+const tempoRestante = inicio => Math.max(5000, PRAZO_TOTAL_MS - (Date.now() - inicio));
+
 // ---------- ponto de entrada ----------
 
 // telasLiberadas: slugs que um funcionário pode ver; null = dono (vê tudo)
 async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard', telasLiberadas = null) {
   console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome, '| source:', source);
+  const inicio = Date.now();
 
   const textoLLM = await callLLM(mensagem, historico, clienteId, clienteNome, usuarioNome, source, telasLiberadas);
 
@@ -411,8 +423,14 @@ ${resumoSemana.resumo}` : ''}`;
     const { consultarMercadoPhone } = require('./mpConsultas');
     console.log('[Agent][3] Tool: consultarMercadoPhone | %s', JSON.stringify(dados));
     try {
-      const resposta = await consultarMercadoPhone(clienteId, dados);
-      console.log('[Agent][4] Resposta MP:', resposta.slice(0, 200));
+      const resultado = await consultarMercadoPhone(clienteId, dados);
+      console.log('[Agent][4] Resposta MP:', resultado.slice(0, 200));
+      if (!dados.analise) return { resposta: resultado, acao: null };
+      // Pediu o que fazer: as ações vêm em cima do número consultado (o DRE entra como contexto; o MP já foi lido)
+      const { responderSobreLoja } = require('./analyticsService');
+      const { fotoDaLoja } = require('./fotoLoja');
+      const foto = await fotoDaLoja(clienteId, { semMP: true });
+      const resposta = await responderSobreLoja(mensagem, foto, source, tempoRestante(inicio), resultado);
       return { resposta, acao: null };
     } catch (err) {
       console.error('[Agent][MP]', err.message);
@@ -420,7 +438,22 @@ ${resumoSemana.resumo}` : ''}`;
     }
   }
 
+  // ── CONSULTAR LOJA (rede de segurança) ────────────────────────────────────
+  // Pergunta sobre o negócio que não cabe numa consulta pronta: responde com a foto da loja (DRE + Mercado Phone)
+  if (intent_type === 'consultar_loja') {
+    const { responderSobreLoja } = require('./analyticsService');
+    const { fotoDaLoja } = require('./fotoLoja');
+    const pergunta = dados.pergunta || mensagem;
+    registrarPergunta(clienteId, usuarioNome, source, intent_type, pergunta);
+    console.log('[Agent][3] Tool: fotoDaLoja | pergunta=%s', pergunta);
+    const foto = await fotoDaLoja(clienteId);
+    const resposta = await responderSobreLoja(pergunta, foto, source, tempoRestante(inicio));
+    console.log('[Agent][5] Resposta loja:', resposta.slice(0, 200));
+    return { resposta, acao: null };
+  }
+
   // ── OUTRO ─────────────────────────────────────────────────────────────────
+  registrarPergunta(clienteId, usuarioNome, source, 'outro', mensagem);
   const resposta = body || 'Como posso ajudar?';
   console.log('[Agent][3] Sem tool. Resposta final:', resposta);
   return { resposta, acao: null };

@@ -217,3 +217,15 @@ CREATE TABLE IF NOT EXISTS log_tentativas (
   data_hora TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS log_tentativas_email_data ON log_tentativas (email, data_hora);
+
+-- PERGUNTAS AO SOUZ AI SEM CONSULTA PRONTA (viram consulta nova depois)
+CREATE TABLE IF NOT EXISTS ia_perguntas (
+  id         SERIAL PRIMARY KEY,
+  cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+  usuario    VARCHAR(255),
+  canal      VARCHAR(20),
+  intent     VARCHAR(40),
+  pergunta   TEXT,
+  criado_em  TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ia_perguntas_criado ON ia_perguntas (criado_em);

@@ -190,14 +190,18 @@ DRE por mês:
 ${contexto}`;
 
 
-  // Roda dentro do chat: API Gateway corta em 29s e o agente já gastou parte disso
+  return gerarResposta(prompt, RESPOSTA_TIMEOUT_MS);
+}
+
+// Roda dentro do chat: API Gateway corta em 29s e o agente já gastou parte disso
+async function gerarResposta(prompt, timeoutMs) {
   const inicio = Date.now();
   const gerar = () => genAI.models.generateContent({
     model:    RESPOSTA_MODEL,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config:   { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
   });
-  const limite = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout analytics')), RESPOSTA_TIMEOUT_MS));
+  const limite = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout analytics')), timeoutMs));
 
   // Gemini sobrecarregado devolve 503 na hora; uma nova tentativa costuma passar
   const comRetentativa = gerar().catch(err => {
@@ -215,4 +219,36 @@ ${contexto}`;
   }
 }
 
-module.exports = { gerarResumoMensal, gerarResumoSemanal, ultimoResumoSemanal, buscarAnalytics, responderComContexto };
+// Pergunta sobre a loja que não cabe numa consulta pronta: responde com a "foto da loja" (DRE do SOUZ + Mercado Phone).
+// `dadoPrincipal` é o resultado de uma consulta já feita (ex.: estoque parado) quando a pessoa pediu análise em cima dela
+async function responderSobreLoja(pergunta, foto, source = 'dashboard', timeoutMs = RESPOSTA_TIMEOUT_MS, dadoPrincipal = null) {
+  const formato = source === 'whatsapp'
+    ? 'Formato: texto simples para WhatsApp, sem markdown, no máximo 8 linhas curtas.'
+    : 'Formato: até 14 linhas. Pode usar **negrito** e listas com "- ". Sem títulos com #.';
+
+  const prompt = `Você é a SOUZ, consultora financeira de lojistas de celular. Responda em português, de forma direta.
+Esta resposta continua uma conversa que já está acontecendo: não cumprimente, não se apresente e não chame a pessoa pelo nome. Fale como alguém da equipe que entende de finanças e de loja de celular — natural e próxima, mas profissional, sem gírias e sem bajulação.
+
+Abaixo está a foto atual da loja: o DRE do SOUZ e os dados do Mercado Phone (sistema de vendas), já calculados agora.
+
+Como responder:
+- Responda exatamente o que foi perguntado, usando os números da foto. Pergunta de número (ex.: "quanto tenho a receber?", "quanto tenho de estoque?") se responde com o número, a composição dele e no máximo um ponto de atenção — SEM lista de ações e sem puxar outros assuntos.
+- Números: use SOMENTE os valores abaixo, sem inventar nem recalcular. Se o dado pedido não estiver na foto, diga em uma frase o que não tem e responda com o que é mais próximo (ex.: perguntou de um modelo específico e só há o total de estoque).
+- Nunca responda apenas "não há dados". Sempre entregue algo útil com o que existe.
+- Só quando a pessoa pedir conselho, estratégia ou "o que fazer": dê de 2 a 4 ações práticas e específicas para a loja, cada uma ligada a um número da foto (ex.: "os R$ 37 mil parados há mais de 180 dias…"). Nada de dica genérica que serviria para qualquer loja.
+- Valores do MP marcados como "a conferir" (títulos vencidos há meses, produtos sem custo) não são dinheiro certo: cite como ponto de atenção.
+- Estoque do MP é pelo preço de custo. Faturamento do mês pode aparecer no DRE (SOUZ) e nas vendas do MP; se forem diferentes, use o do DRE e diga que o MP mostra outro valor.
+${formato}
+
+Pergunta: ${pergunta}
+${dadoPrincipal ? `
+Resultado da consulta que a pessoa pediu (use como base principal da resposta):
+${dadoPrincipal}
+` : ''}
+Foto da loja:
+${foto}`;
+
+  return gerarResposta(prompt, timeoutMs);
+}
+
+module.exports = { gerarResumoMensal, gerarResumoSemanal, ultimoResumoSemanal, buscarAnalytics, responderComContexto, responderSobreLoja };

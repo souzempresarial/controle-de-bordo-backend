@@ -55,6 +55,12 @@ functions:
     events:
       - schedule: cron(0 11 * * ? *)  # 08:00 BRT (11:00 UTC) todos os dias
 
+  fotos:
+    handler: fotosHandler.fotos
+    timeout: 900  # foto da loja para o SOUZ AI: lê o MP de cada loja, uma por vez
+    events:
+      - schedule: cron(0 11,14,17,20,23 * * ? *)  # 08h, 11h, 14h, 17h e 20h BRT
+
   analytics:
     handler: analyticsHandler.gerarAnalytics
     timeout: 900  # resumos de todas as lojas: ~3,5 min hoje, cresce com cada loja nova
