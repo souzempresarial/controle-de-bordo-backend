@@ -121,11 +121,16 @@ function textoFotoMP(p) {
 
 // semMP: só o DRE, para quando o dado do MP já foi consultado à parte (evita ler o MP duas vezes)
 // forcar + limiteMP: usados pelo job, que refaz a foto mesmo com cache e espera o MP o quanto precisar
-async function fotoDaLoja(clienteId, { semMP = false, forcar = false, limiteMP = LIMITE_MP } = {}) {
+async function fotoDaLoja(clienteId, opcoes) {
+  return (await montarFoto(clienteId, opcoes)).texto;
+}
+
+// completa = false quando alguma parte do MP não chegou (aí a foto não é guardada)
+async function montarFoto(clienteId, { semMP = false, forcar = false, limiteMP = LIMITE_MP } = {}) {
   const chave = `ia:foto:${clienteId}`;
   if (!forcar) {
     const cache = await redis.get(chave).catch(() => null);
-    if (cache?.texto) return cache.texto;
+    if (cache?.texto) return { texto: cache.texto, completa: true };
   }
 
   const hoje = hojeISO();
@@ -162,7 +167,21 @@ async function fotoDaLoja(clienteId, { semMP = false, forcar = false, limiteMP =
 
   // Só guarda a foto completa; se faltou parte do MP, a próxima pergunta tenta de novo
   if (!semMP && !mp.faltou.length) await redis.set(chave, { texto }, { ex: CACHE_TTL }).catch(() => {});
-  return texto;
+  return { texto, completa: !mp.faltou.length };
+}
+
+const esperar = ms => new Promise(ok => setTimeout(ok, ms));
+
+// O job não tem pressa: quando o MP pede para esperar (limite de consultas), espera e tenta de novo.
+// As vendas ficam em cache mês a mês, então cada nova tentativa continua de onde a anterior parou
+async function comPaciencia(tarefa, tentativas = 4) {
+  for (let n = 1; ; n++) {
+    try { return await tarefa(); }
+    catch (err) {
+      if (n >= tentativas || !/limite de uso|rate limit|429/i.test(err.message)) throw err;
+      await esperar(20000);
+    }
+  }
 }
 
 // Job: refaz a foto de cada loja com MP, uma por vez (o MP limita consultas por minuto)
@@ -172,15 +191,21 @@ async function atualizarFotos() {
   const resultado = { ok: 0, erro: 0 };
   for (const { cliente_id } of rows) {
     try {
-      await fotoDaLoja(cliente_id, { forcar: true, limiteMP: 120000 });
+      // A foto só é guardada completa; se o MP cortou alguma parte, espera e refaz
+      // (a foto anterior continua valendo enquanto isso)
+      for (let n = 0; n < 3; n++) {
+        if ((await montarFoto(cliente_id, { forcar: true, limiteMP: 120000 })).completa) break;
+        await esperar(20000);
+      }
       // Aquece o que as consultas de clientes usam: 24 meses de vendas (mês fechado fica 7 dias em cache) e o cadastro
       const chaves = await chavesDoCliente(cliente_id);
       const d = new Date(); d.setMonth(d.getMonth() - 25); d.setDate(1);
-      await vendasPeriodo(cliente_id, chaves, d.toLocaleDateString('sv-SE'), hojeISO());
-      await cadastroClientes(cliente_id, chaves);
+      await comPaciencia(() => vendasPeriodo(cliente_id, chaves, d.toLocaleDateString('sv-SE'), hojeISO()));
+      await comPaciencia(() => cadastroClientes(cliente_id, chaves));
       resultado.ok++;
     }
     catch (err) { console.error('[fotoLoja] job', cliente_id, err.message); resultado.erro++; }
+    await esperar(5000); // folga entre lojas para o limite do MP zerar
   }
   return resultado;
 }
