@@ -160,11 +160,17 @@ async function buscarAnalytics(clienteId, pergunta) {
   return rows; // [{ periodo, resumo, similaridade }]
 }
 
+// Cada item "- **Nome:** ..." vira um card na tela do chat (TextoFormatado.jsx)
+const formatoTela = linhas => `Formato (até ${linhas} linhas, sem títulos com #):
+- Comece com uma frase curta que já responde a pergunta, com o número principal em **negrito**.
+- Se a resposta tiver mais de um número ou mais de uma parte, NUNCA escreva em parágrafo corrido: coloque cada parte em um item, exatamente assim: - **Nome da parte:** R$ 0,00 e um complemento curto. Use um único valor em R$ por item sempre que possível.
+- Se precisar concluir, feche com uma frase curta depois dos itens.`;
+
 // contexto: texto com o DRE de cada mês (services/dre.js → textoDRE)
 async function responderComContexto(pergunta, contexto, source = 'dashboard') {
   const formato = source === 'whatsapp'
     ? 'Formato: texto simples para WhatsApp, sem markdown, no máximo 6 linhas curtas.'
-    : 'Formato: até 12 linhas. Pode usar **negrito** e listas com "- ". Sem títulos com #.';
+    : formatoTela(12);
 
   const prompt = `Você é a SOUZ, consultora financeira de lojistas de celular. Responda em português, de forma direta.
 Esta resposta continua uma conversa que já está acontecendo: não cumprimente, não se apresente e não chame a pessoa pelo nome. Fale como alguém da equipe que entende de finanças — natural e próxima, mas profissional, sem gírias e sem bajulação.
@@ -224,7 +230,7 @@ async function gerarResposta(prompt, timeoutMs) {
 async function responderSobreLoja(pergunta, foto, source = 'dashboard', timeoutMs = RESPOSTA_TIMEOUT_MS, dadoPrincipal = null) {
   const formato = source === 'whatsapp'
     ? 'Formato: texto simples para WhatsApp, sem markdown, no máximo 8 linhas curtas.'
-    : 'Formato: até 14 linhas. Pode usar **negrito** e listas com "- ". Sem títulos com #.';
+    : formatoTela(14);
 
   const prompt = `Você é a SOUZ, consultora financeira de lojistas de celular. Responda em português, de forma direta.
 Esta resposta continua uma conversa que já está acontecendo: não cumprimente, não se apresente e não chame a pessoa pelo nome. Fale como alguém da equipe que entende de finanças e de loja de celular — natural e próxima, mas profissional, sem gírias e sem bajulação.
