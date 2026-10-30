@@ -8,7 +8,7 @@ const CHAT_TTL  = 604800; // 7 dias em segundos
 async function chat(req, res) {
   try {
     const { clienteId } = req.params;
-    const { mensagem, clienteNome, usuarioNome } = req.body;
+    const { mensagem, clienteNome, usuarioNome, somenteConsulta } = req.body;
 
     if (!mensagem || typeof mensagem !== 'string' || !mensagem.trim()) {
       return res.status(400).json({ erro: 'Mensagem não pode ser vazia' });
@@ -25,7 +25,7 @@ async function chat(req, res) {
     }
 
     const telasLiberadas = req.usuario.papel === 'funcionario' ? (req.usuario.permissoes || []) : null;
-    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'dashboard', telasLiberadas);
+    const resultado = await processarMensagem(mensagem.trim(), historico, clienteId, clienteNome, usuarioNome, 'dashboard', telasLiberadas, somenteConsulta === true);
 
     // Salva histórico atualizado no Redis
     try {
@@ -42,7 +42,7 @@ async function chat(req, res) {
     res.json(resultado);
   } catch (err) {
     console.error('[Agent] Erro:', err.message, err.stack);
-    res.status(500).json({ erro: 'Erro no assistente. Tente novamente.', detalhe: err.message });
+    res.status(500).json({ erro: 'Erro no assistente. Tente novamente.' });
   }
 }
 
@@ -72,15 +72,28 @@ const AUDIO_MAX_BASE64 = 8 * 1024 * 1024; // ~6 MB de áudio; o ditado tem no m�
 
 async function transcrever(req, res) {
   try {
-    const { audio, mimeType } = req.body;
+    const { audio, mimeType, conversa } = req.body;
     if (!audio || typeof audio !== 'string') return res.status(400).json({ erro: 'Áudio não enviado' });
     if (audio.length > AUDIO_MAX_BASE64) return res.status(413).json({ erro: 'Áudio muito longo. Grave até 1 minuto.' });
     if (mimeType && !/^audio\//.test(mimeType)) return res.status(400).json({ erro: 'Formato de áudio inválido' });
-    const texto = await transcreverAudio(audio, mimeType, req.params.clienteId);
+    const texto = await transcreverAudio(audio, mimeType, req.params.clienteId, { comVocabulario: conversa !== true });
     res.json({ texto });
   } catch (err) {
     console.error('[Agent] Erro ao transcrever:', err.message);
     res.status(500).json({ erro: 'Não consegui entender o áudio. Tente de novo.' });
+  }
+}
+
+// Resposta do SOUZ AI em voz: gera o áudio só quando a pessoa clica em "Ouvir"
+async function falar(req, res) {
+  try {
+    const { texto } = req.body;
+    if (!texto || typeof texto !== 'string') return res.status(400).json({ erro: 'Texto não enviado' });
+    const { falar: gerarFala } = require('../services/voz');
+    res.json(await gerarFala(texto, req.params.clienteId));
+  } catch (err) {
+    console.error('[Agent] Erro ao gerar voz:', err.message);
+    res.status(err.status || 500).json({ erro: err.mensagemUsuario || 'Não consegui gerar o áudio agora. Tente de novo.' });
   }
 }
 
@@ -102,4 +115,4 @@ async function resumoSemana(req, res) {
   }
 }
 
-module.exports = { chat, historico, limpar, transcrever, resumoSemana };
+module.exports = { chat, historico, limpar, transcrever, resumoSemana, falar };

@@ -7,5 +7,6 @@ router.get('/historico', controller.historico);
 router.get('/resumo-semana', controller.resumoSemana);
 router.delete('/historico', controller.limpar);
 router.post('/transcrever', controller.transcrever);
+router.post('/falar', controller.falar);
 
 module.exports = router;

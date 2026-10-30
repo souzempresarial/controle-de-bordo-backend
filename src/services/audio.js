@@ -13,9 +13,10 @@ Como escrever:
 - Produtos como as lojas escrevem: iPhone 15 Pro Max, iPhone 13 Pro, iPhone 11, Redmi Note 14S, Poco X7, Galaxy A55, Apple Watch Series 6, AirPods Pro, MacBook Air, iPad, capinha MagSafe, película 3D, película de privacidade, carregador turbo, fonte 20W.
 - Termos do financeiro: Pix, cartão, débito, crédito, maquininha, boleto, upgrade, downgrade, troca, pró-labore, retirada, CMV, DRE, faturamento, margem bruta, lucro, fornecedor, frete, motoboy, sinal, pré-venda, comissão.
 - Bancos e maquininhas: Sicoob, Sicredi, PagBank, Stone, Nubank, Itaú, Bradesco, Santander, Banco do Brasil, Inter, C6, Mercado Pago, InfinitePay, SumUp, Cielo, Rede.
-- Nomes de pessoas e lojas com inicial maiúscula.`;
+- Nomes de pessoas e lojas com inicial maiúscula.
+- A pessoa também conversa normalmente: cumprimentos e frases curtas como "oi", "oi chat, tudo bem?", "obrigado", "me leva para o financeiro" são comuns. "Chat" e "SOUZ" são formas de chamar a assistente.`;
 
-const FINAL = 'Não responda à pergunta, não corrija nem complete o que a pessoa disse, não explique nada. Retorne só a transcrição. Se não houver fala, retorne vazio.';
+const FINAL = 'Priorize sempre o som do que foi dito. Só use um nome da lista acima se a pessoa falou esse nome com clareza: nunca troque uma palavra comum por um nome parecido. Não responda à pergunta, não corrija nem complete o que a pessoa disse, não explique nada. Retorne só a transcrição. Se não houver fala, retorne vazio.';
 
 // Nomes próprios da loja (dono, equipe, fornecedores) são o que mais erra na transcrição: vão como referência de grafia
 const cacheVocab = new Map(); // clienteId → { texto, ate }
@@ -37,7 +38,7 @@ async function vocabularioDaLoja(clienteId) {
     const nomes = [c?.loja, c?.nome, ...pessoas.map(p => p.nome)].filter(Boolean);
     const texto = [
       nomes.length ? `Loja e pessoas desta conta: ${[...new Set(nomes)].join(', ')}.` : '',
-      descricoes.length ? `Nomes e descrições que esta loja costuma lançar (use esta grafia quando ouvir algo parecido): ${descricoes.map(d => d.d).join('; ')}.` : '',
+      descricoes.length ? `Nomes e descrições que esta loja costuma lançar (só como referência de grafia quando a pessoa falar exatamente isso): ${descricoes.map(d => d.d).join('; ')}.` : '',
     ].filter(Boolean).join('\n');
     cacheVocab.set(String(clienteId), { texto, ate: Date.now() + 10 * 60 * 1000 });
     return texto;
@@ -47,9 +48,10 @@ async function vocabularioDaLoja(clienteId) {
   }
 }
 
-async function transcreverAudio(base64, mimeType, clienteId) {
+// comVocabulario false (conversa por voz): em frase curta, a lista de nomes troca palavras e até inventa frases
+async function transcreverAudio(base64, mimeType, clienteId, { comVocabulario = true } = {}) {
   const tipo = (mimeType || 'audio/ogg').split(';')[0];
-  const vocab = await vocabularioDaLoja(clienteId);
+  const vocab = comVocabulario ? await vocabularioDaLoja(clienteId) : '';
   const instrucao = [INSTRUCAO, vocab, FINAL].filter(Boolean).join('\n\n');
   const gerar = () => genAI.models.generateContent({
     model: MODELO,
@@ -57,10 +59,10 @@ async function transcreverAudio(base64, mimeType, clienteId) {
       role: 'user',
       parts: [
         { inlineData: { mimeType: tipo, data: base64 } },
-        { text: instrucao },
+        { text: 'Transcreva este áudio.' },
       ],
     }],
-    config: { temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } },
+    config: { systemInstruction: instrucao, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
   });
   // Gemini sobrecarregado devolve 503 na hora; uma nova tentativa costuma passar
   const result = await gerar().catch(err => {

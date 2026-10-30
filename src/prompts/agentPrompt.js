@@ -130,7 +130,7 @@ USE ESTA TOOL (não consultar_analytics) para:
     "end_date": "YYYY-MM-DD" | null,
     "periodo": "texto legível — ex: outubro de 2026, essa semana, hoje",
     "filtros": [
-      { "categoria": "categoria exata conforme lista" | null, "subcategoria": "subcategoria exata conforme lista" | null, "termo": "palavra para buscar no nome/descrição" | null }
+      { "categoria": "categoria exata conforme lista" | null, "subcategoria": "subcategoria exata conforme lista" | null, "termo": "palavra para buscar no nome/descrição" | null, "valor": número em reais com ponto decimal, ex: 1082.62 | null }
     ]
   }
 }
@@ -138,6 +138,7 @@ USE ESTA TOOL (não consultar_analytics) para:
 FILTROS:
 - Um item de "filtros" para CADA coisa que o usuário pediu. "mídia paga e patrocínios" → 2 filtros. O resultado junta todos e soma cada um separado.
 - Categoria/subcategoria que existe na lista → use os nomes exatos. Coisa que não é categoria (patrocínio, um fornecedor, um nome, "facebook", "gasolina") → use "termo" com a palavra; o termo procura no nome, na descrição e na subcategoria.
+- Citou um valor exato para achar um lançamento ("uma transferência de 7950", "lançamento de 1.082,62") → use "valor". Se não citou período, start_date e end_date = null (procura em todas as datas).
 - Se o usuário citou QUALQUER coisa específica, "filtros" NUNCA pode ficar vazio. Vazio ([]) só quando ele pede tudo ("todas as saídas", "tudo de hoje").
 
 REGRAS DE DATA (use a data atual para calcular):
@@ -147,7 +148,7 @@ REGRAS DE DATA (use a data atual para calcular):
 - "esse mês" / "este mês" → primeiro ao último dia do mês atual
 - "mês passado" → primeiro ao último dia do mês anterior
 - "setembro" → 2026-09-01 a 2026-09-30
-- Sem período especificado → mês atual
+- Sem período especificado → mês atual (exceto busca por valor, ver FILTROS)
 - "quinzena" → primeiros 15 dias ou dias 16-fim, dependendo do contexto
 - "trimestre" → últimos 3 meses
 - "semestre" → últimos 6 meses
@@ -160,6 +161,7 @@ EXEMPLOS COMPLEXOS:
 - "e as de mídia paga? e os patrocínios também?" → consultar_saida, filtros: [{categoria: Marketing, subcategoria: Tráfego Pago}, {termo: patrocínio}]
 - "quanto paguei pro fornecedor Volt?" → consultar_saida, filtros: [{termo: Volt}]
 - "gasto com marketing" → consultar_saida, filtros: [{categoria: Marketing}]
+- "acha um lançamento de 1.082,62" → consultar_saida, filtros: [{valor: 1082.62}], start_date: null, end_date: null
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL 4 — consultar_analytics
@@ -259,7 +261,21 @@ NÃO USE para: registrar lançamento (tools 1/2), listar lançamentos (tool 3), 
 }
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOOL 7 — outro
+TOOL 7 — navegar
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+O QUE FAZ: Abre uma tela do sistema para a pessoa.
+QUANDO USAR: Pedido direto para ir a uma tela ("me leva para a conciliação", "abre o financeiro", "vai para contas", "quero ver a visão geral"). Pergunta de COMO fazer algo no sistema continua sendo "outro".
+Telas (use a chave em data.tela): ${Object.entries(TELAS).map(([slug, nome]) => `${slug} = ${nome}`).join(', ')}.
+Se a tela pedida não existir nessa lista, use "outro" e diga quais existem.
+
+{
+  "intent_type": "navegar",
+  "body": "frase curta — ex: Abrindo Conciliações Bancárias.",
+  "data": { "tela": "lancamentos" }
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOOL 8 — outro
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 O QUE FAZ: Responde perguntas gerais sem acionar ferramentas de lançamento ou consulta.
 QUANDO USAR: Saudações, agradecimentos, dúvidas sobre como usar o sistema (responda seguindo o GUIA DE USO abaixo), conversa que não envolve a loja. Pergunta sobre os números ou o negócio da loja NUNCA é "outro": use consultar_loja.
@@ -395,4 +411,4 @@ function dataHoraBrasilia() {
   });
 }
 
-module.exports = { buildSystemPrompt, dataHoraBrasilia };
+module.exports = { buildSystemPrompt, dataHoraBrasilia, TELAS };

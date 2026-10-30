@@ -1,5 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
-const { buildSystemPrompt, dataHoraBrasilia } = require('../prompts/agentPrompt');
+const { buildSystemPrompt, dataHoraBrasilia, TELAS } = require('../prompts/agentPrompt');
 const pool = require('../models/db');
 
 const GEMINI_MODEL  = 'gemini-3.6-flash';
@@ -81,7 +81,7 @@ async function callGemini(mensagem, historico, systemPrompt) {
 
 // ---------- DeepSeek fallback ----------
 
-async function callDeepSeek(mensagem, historico, systemPrompt) {
+async function callDeepSeek(mensagem, historico, systemPrompt, timeoutMs) {
   const messages = [
     { role: 'system', content: systemPrompt },
     ...historico.slice(-MAX_HISTORICO).map(h => ({
@@ -94,7 +94,7 @@ async function callDeepSeek(mensagem, historico, systemPrompt) {
   ];
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
   try {
     const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -129,8 +129,12 @@ async function identificacaoLoja(clienteId, clienteNome) {
   return clienteNome ? `Nome da loja/empresa: ${clienteNome}` : '';
 }
 
+// A reserva só tem o tempo que o Gemini deixou: a soma não pode passar do corte de 29s do API Gateway
+const PRAZO_LLM_MS = 22000;
+
 async function callLLM(mensagem, historico, clienteId, clienteNome, usuarioNome, source, telasLiberadas) {
-  const promptBase   = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source, telasLiberadas, !historico?.length);
+  const inicio = Date.now();
+  const promptBase  = buildSystemPrompt(dataHoraBrasilia(), usuarioNome, source, telasLiberadas, !historico?.length);
   const loja         = await identificacaoLoja(clienteId, clienteNome);
   const systemPrompt = loja ? `${promptBase}\n\n${loja}` : promptBase;
 
@@ -147,7 +151,7 @@ async function callLLM(mensagem, historico, clienteId, clienteNome, usuarioNome,
     console.warn('[Agent] Gemini falhou:', err.message, '— tentando DeepSeek...');
     if (process.env.DEEPSEEK_API_KEY) {
       try {
-        return await callDeepSeek(mensagem, historico, systemPrompt);
+        return await callDeepSeek(mensagem, historico, systemPrompt, Math.max(3000, PRAZO_LLM_MS - (Date.now() - inicio)));
       } catch (err2) {
         console.warn('[Agent] DeepSeek também falhou:', err2.message);
       }
@@ -198,8 +202,20 @@ async function criarLancamento(clienteId, tipo, dados) {
 const SEM_ACENTO = col => `translate(lower(${col}), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
 const semAcento  = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-// Cada filtro vira um grupo (categoria/subcategoria exatas ou termo livre); a busca junta todos com OU
+const valorDoFiltro = f => Number(f.valor) || normalizeValor(f.valor);
+
+// Cada filtro vira um grupo (categoria/subcategoria exatas, termo livre ou valor); a busca junta todos com OU
 function montarFiltro(f, params) {
+  const valor = valorDoFiltro(f);
+  if (valor > 0) {
+    // O valor já identifica o lançamento: "transferência de 7950" não pode depender da palavra estar na descrição.
+    // Inteiro pode ter sido arredondado ao falar: "1082" acha R$ 1.082,62
+    params.push(valor);
+    const idx = params.length;
+    return Number.isInteger(valor)
+      ? `(valor >= $${idx}::numeric AND valor < $${idx}::numeric + 1)`
+      : `round(valor::numeric, 2) = $${idx}::numeric`;
+  }
   const partes = [];
   if (f.categoria) {
     params.push(f.categoria);
@@ -220,7 +236,7 @@ function montarFiltro(f, params) {
   return partes.length ? `(${partes.join(' AND ')})` : null;
 }
 
-const nomeFiltro = f => { const n = String(f.termo || f.subcategoria || f.categoria); return n[0].toUpperCase() + n.slice(1); };
+const nomeFiltro = f => { const n = f.valor ? fmtBRL(valorDoFiltro(f)) : String(f.termo || f.subcategoria || f.categoria); return n[0].toUpperCase() + n.slice(1); };
 
 async function buscarLancamentos(clienteId, startDate, endDate, tipo, filtros = []) {
   const params  = [clienteId];
@@ -325,7 +341,7 @@ const tempoRestante = inicio => Math.max(5000, PRAZO_TOTAL_MS - (Date.now() - in
 // ---------- ponto de entrada ----------
 
 // telasLiberadas: slugs que um funcionário pode ver; null = dono (vê tudo)
-async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard', telasLiberadas = null) {
+async function processarMensagem(mensagem, historico, clienteId, clienteNome, usuarioNome, source = 'dashboard', telasLiberadas = null, somenteConsulta = false) {
   console.log('[Agent][1] Mensagem recebida:', mensagem, '| usuario:', usuarioNome, '| source:', source);
   const inicio = Date.now();
 
@@ -335,8 +351,26 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
   const { intent_type, body, data: dados = {} } = parsed;
   console.log('[Agent][2] Intent:', intent_type, '| Dados:', JSON.stringify(dados));
 
+  // ── ABRIR UMA TELA ──
+  if (intent_type === 'navegar') {
+    const nomeTela = TELAS[dados.tela];
+    if (source !== 'dashboard') return { resposta: nomeTela ? `Essa tela fica no sistema: ${nomeTela}.` : (body || 'Como posso ajudar?'), acao: null };
+    if (!nomeTela) return { resposta: body || 'Não encontrei essa tela. Qual você quer abrir?', acao: null };
+    // Funcionário só abre o que a conta dele libera, igual ao menu
+    if (Array.isArray(telasLiberadas) && !telasLiberadas.includes(dados.tela)) {
+      return { resposta: `Seu acesso não inclui ${nomeTela}. Peça ao responsável da loja para liberar.`, acao: null };
+    }
+    return { resposta: body || `Abrindo ${nomeTela}.`, acao: null, navegar: dados.tela };
+  }
+
   // ── CRIAR LANÇAMENTO ──────────────────────────────────────────────────────
   if (intent_type === 'criar_entrada' || intent_type === 'criar_saida') {
+    // Conversa por voz não grava: áudio mal entendido viraria lançamento errado sem ninguém conferir
+    if (somenteConsulta) {
+      console.log('[Agent][3] Lançamento bloqueado: conversa por voz é só consulta');
+      return { resposta: 'Por voz eu só consulto. Para registrar esse lançamento, digite no chat que eu faço na hora.', acao: null };
+    }
+
     // Funcionário só lança se tiver a mesma permissão exigida na tela de Conciliações
     if (Array.isArray(telasLiberadas) && !telasLiberadas.includes('lancamentos')) {
       console.log('[Agent][3] Lançamento bloqueado: funcionário sem permissão de lançamentos');
@@ -372,13 +406,21 @@ async function processarMensagem(mensagem, historico, clienteId, clienteNome, us
     const periodo     = dados.periodo      || null;
     // Formato antigo (categoria/subcategoria soltos) ainda vale como um filtro só
     const filtros = (Array.isArray(dados.filtros) ? dados.filtros : [{ categoria: dados.categoria, subcategoria: dados.subcategoria }])
-      .filter(f => f && (f.categoria || f.subcategoria || f.termo));
+      .filter(f => f && (f.categoria || f.subcategoria || f.termo || f.valor));
     console.log('[Agent][3] Tool: buscarLancamentos | tipo=%s start=%s end=%s filtros=%s', tipo, startDate, endDate, JSON.stringify(filtros));
 
-    const consulta = await buscarLancamentos(clienteId, startDate, endDate, tipo, filtros);
+    // Quem procura por valor nem sempre sabe se foi entrada ou saída, nem o mês certo
+    const porValor  = filtros.some(f => f.valor);
+    const tipoBusca = porValor ? null : tipo;
+    let consulta = await buscarLancamentos(clienteId, startDate, endDate, tipoBusca, filtros);
+    let aviso = '';
+    if (porValor && !consulta.quantidade && (startDate || endDate)) {
+      consulta = await buscarLancamentos(clienteId, null, null, null, filtros);
+      if (consulta.quantidade) aviso = `Nesse valor não achei nada${periodo ? ` em ${periodo}` : ' nesse período'}, mas achei em outra data.\n\n`;
+    }
     console.log('[Agent][4] Lançamentos encontrados:', consulta.quantidade, '| total:', consulta.total);
 
-    const resposta = formatarResultadoConsulta(consulta, periodo, tipo);
+    const resposta = aviso + formatarResultadoConsulta(consulta, aviso ? null : periodo, tipoBusca);
     console.log('[Agent][5] Resposta final (consulta):', resposta.slice(0, 200));
     return { resposta, acao: null };
   }
